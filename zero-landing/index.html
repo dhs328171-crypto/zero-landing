@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="ar" dir="rtl" class="dark" data-default-dir="rtl">
+  <head>
+    <script>
+      // Pre-paint language + direction to avoid RTL/LTR flash on load.
+      (function () {
+        try {
+          var lang = localStorage.getItem("zero_lang");
+          if (lang === "en") {
+            document.documentElement.lang = "en";
+            document.documentElement.dir = "ltr";
+          } else {
+            document.documentElement.lang = "ar";
+            document.documentElement.dir = "rtl";
+          }
+        } catch (e) {}
+      })();
+    </script>
+    <meta charset="UTF-8" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="preconnect" href="https://images.unsplash.com" />
+    <link rel="dns-prefetch" href="https://d2xsxph8kpxj0f.cloudfront.net" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="apple-touch-icon" href="/zero-logo.png" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0" />
+    <meta name="theme-color" content="#0F1419" />
+    <meta name="description" content="ZERO — Software Architect Solutions. مطور Full Stack بخبرة 5+ سنوات. أبني المواقع والتطبيقات والأنظمة الرقمية الاحترافية." />
+    <meta name="keywords" content="مطور, Full Stack, React, Next.js, تطبيقات, مواقع, متاجر إلكترونية, ZERO" />
+    <meta name="author" content="ZERO" />
+
+    <!-- Open Graph -->
+    <meta property="og:title" content="ZERO — Software Architect Solutions" />
+    <meta property="og:description" content="أحوّل أفكارك إلى حلول رقمية احترافية تتفوق على المنافسين." />
+    <meta property="og:image" content="/opengraph.jpg" />
+    <meta property="og:type" content="website" />
+    <meta property="og:locale" content="ar_AR" />
+
+    <title>ZERO — Software Architect Solutions</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

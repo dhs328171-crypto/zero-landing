@@ -1,0 +1,262 @@
+// ============================================================================
+//  Prisma schema — supports both SQLite (default, dev) and PostgreSQL (prod).
+//
+//  Switch provider:
+//    • SQLite (default):
+//        DATABASE_URL="file:./dev.db"
+//        provider = "sqlite"
+//
+//    • PostgreSQL:
+//        DATABASE_URL="postgresql://user:pass@localhost:5432/zero_db?schema=public"
+//        provider = "postgresql"
+//
+//  After changing provider, run:
+//    cd server
+//    npx prisma generate
+//    npx prisma migrate dev --name init   (PostgreSQL)
+//    # or
+//    npx prisma db push                   (SQLite — quick dev reset)
+// ============================================================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  // Override via env: change to "postgresql" in production.
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// ----------------------------------------------------------------------------
+//  Users
+//  - `password`        : bcrypt hash (used for authentication, never decrypted)
+//  - `passwordVault`   : AES-256-GCM encrypted plaintext (admin-only recovery)
+//  - `lockedUntil`     : account lockout timestamp (set after too many fails)
+//  - `failedAttempts`  : running counter for failed logins
+// ----------------------------------------------------------------------------
+model User {
+  id              String    @id @default(cuid())
+  email           String    @unique
+  name            String
+  password        String
+  passwordVault   String?
+  role            String    @default("user") // "admin" | "user"
+  avatar          String?
+  bio             String?
+  phone           String?
+  country         String?
+  website         String?
+  verified        Boolean   @default(false)
+  joinedAt        DateTime  @default(now())
+  lastLoginAt     DateTime?
+  lastLoginIp     String?
+  failedAttempts  Int       @default(0)
+  lockedUntil     DateTime?
+  posts           BlogPost[]
+  auditLogs       AuditLog[]
+  loginAttempts   LoginAttempt[]
+}
+
+// ----------------------------------------------------------------------------
+//  Projects (portfolio)
+// ----------------------------------------------------------------------------
+model Project {
+  id          String   @id @default(cuid())
+  title       String
+  slug        String   @unique
+  description String
+  tech        String
+  category    String
+  image       String
+  url         String?
+  featured    Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+// ----------------------------------------------------------------------------
+//  Blog
+// ----------------------------------------------------------------------------
+model BlogPost {
+  id        String   @id @default(cuid())
+  title     String
+  slug      String   @unique
+  excerpt   String
+  content   String
+  image     String
+  tag       String   @default("General")
+  hot       Boolean  @default(false)
+  published Boolean  @default(true)
+  views     Int      @default(0)
+  authorId  String?
+  author    User?    @relation(fields: [authorId], references: [id])
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// ----------------------------------------------------------------------------
+//  Contact messages
+// ----------------------------------------------------------------------------
+model Message {
+  id        String   @id @default(cuid())
+  name      String
+  email     String
+  subject   String
+  message   String
+  read      Boolean  @default(false)
+  starred   Boolean  @default(false)
+  createdAt DateTime @default(now())
+}
+
+// ----------------------------------------------------------------------------
+//  Testimonials
+// ----------------------------------------------------------------------------
+model Testimonial {
+  id        String   @id @default(cuid())
+  name      String
+  role      String
+  company   String?
+  rating    Int      @default(5)
+  text      String
+  avatar    String?
+  approved  Boolean  @default(true)
+  featured  Boolean  @default(false)
+  createdAt DateTime @default(now())
+}
+
+// ----------------------------------------------------------------------------
+//  FAQ
+// ----------------------------------------------------------------------------
+model FAQ {
+  id        String  @id @default(cuid())
+  question  String
+  answer    String
+  category  String  @default("general")
+  order     Int     @default(0)
+  visible   Boolean @default(true)
+  createdAt DateTime @default(now())
+}
+
+// ----------------------------------------------------------------------------
+//  Services
+// ----------------------------------------------------------------------------
+model Service {
+  id          String   @id @default(cuid())
+  title       String
+  description String
+  icon        String
+  features    String
+  price       String?
+  active      Boolean  @default(true)
+  order       Int      @default(0)
+  createdAt   DateTime @default(now())
+}
+
+// ----------------------------------------------------------------------------
+//  Media library (admin uploads)
+// ----------------------------------------------------------------------------
+model Media {
+  id        String   @id @default(cuid())
+  name      String
+  url       String
+  type      String
+  size      Int
+  alt       String?
+  createdAt DateTime @default(now())
+}
+
+// ----------------------------------------------------------------------------
+//  Audit Log — every admin action is recorded for forensic review.
+// ----------------------------------------------------------------------------
+model AuditLog {
+  id        String   @id @default(cuid())
+  actorId   String?
+  actor     User?    @relation(fields: [actorId], references: [id])
+  actorEmail String?
+  action    String   // e.g. "USER_VIEW_PASSWORD", "LINK_MASK_CREATE"
+  target    String?  // e.g. user id, link slug
+  ip        String?
+  userAgent String?
+  meta      String?  // JSON string
+  createdAt DateTime @default(now())
+
+  @@index([actorId])
+  @@index([action])
+  @@index([createdAt])
+}
+
+// ----------------------------------------------------------------------------
+//  Login Attempt — every login attempt (success or failure) is recorded.
+//  Used for brute-force detection and IP banning.
+// ----------------------------------------------------------------------------
+model LoginAttempt {
+  id        String   @id @default(cuid())
+  email     String?
+  ip        String
+  userAgent String?
+  success   Boolean  @default(false)
+  reason    String?  // e.g. "invalid_password", "locked", "banned_ip"
+  userId    String?
+  user      User?    @relation(fields: [userId], references: [id])
+  createdAt DateTime @default(now())
+
+  @@index([ip])
+  @@index([email])
+  @@index([createdAt])
+}
+
+// ----------------------------------------------------------------------------
+//  Banned IP — manually or automatically banned IPs.
+// ----------------------------------------------------------------------------
+model BannedIp {
+  id        String   @id @default(cuid())
+  ip        String   @unique
+  reason    String   @default("auto: brute force")
+  bannedBy  String?  // admin email or "system"
+  bannedAt  DateTime @default(now())
+  expiresAt DateTime? // null = permanent
+
+  @@index([ip])
+}
+
+// ----------------------------------------------------------------------------
+//  Link Mask — URL cloaking / disguise feature.
+//  The admin creates a short, branded alias (slug) that redirects to a
+//  real (often long or ugly) target URL. Useful for affiliate links,
+//  external PDFs, tracking campaigns, etc.
+// ----------------------------------------------------------------------------
+model LinkMask {
+  id          String   @id @default(cuid())
+  slug        String   @unique   // e.g. "github" → /r/github
+  targetUrl   String              // the real destination URL
+  title       String?             // human label (admin UI only)
+  description String?
+  clicks      Int      @default(0)
+  active      Boolean  @default(true)
+  expiresAt   DateTime?
+  password    String?             // optional password protection (bcrypt)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([slug])
+  @@index([active])
+}
+
+// ----------------------------------------------------------------------------
+//  Security Event — captures security-relevant signals for the dashboard.
+// ----------------------------------------------------------------------------
+model SecurityEvent {
+  id        String   @id @default(cuid())
+  type      String   // "rate_limit_hit", "sql_injection_attempt", "xss_attempt", ...
+  severity  String   @default("info") // "info" | "warn" | "critical"
+  ip        String?
+  path      String?
+  detail    String?
+  blocked   Boolean  @default(true)
+  createdAt DateTime @default(now())
+
+  @@index([type])
+  @@index([severity])
+  @@index([createdAt])
+}
