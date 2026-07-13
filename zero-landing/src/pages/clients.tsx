@@ -3,6 +3,7 @@ import { Footer } from "@/components/layout/Footer";
 import { motion } from "framer-motion";
 import { Star, Quote, Award, Users, TrendingUp, Heart } from "lucide-react";
 import { Counter } from "@/components/ui/counter";
+import { useT } from "@/contexts/i18n-context";
 
 const testimonials = [
   { name: "أحمد السعيد", company: "متجر الرياض", role: "صاحب متجر إلكتروني", rating: 5, text: "ZERO غيّر تصوري للتطوير المحترف. الموقع اللي بناه يتحدث عن نفسه — سرعة خارقة وتصميم يبهر الزوار من أول لحظة. المبيعات ارتفعت 60% في أول شهر.", project: "متجر إلكتروني + لوحة تحكم", avatar: "أ", color: "from-cyan-500/20 to-blue-500/20" },
@@ -13,15 +14,16 @@ const testimonials = [
   { name: "أكاديمية النور", company: "النور للتعليم", role: "منصة تعليمية", rating: 5, text: "المنصة التعليمية تجاوزت توقعاتنا في كل شيء. سهولة الاستخدام للطلاب والمعلمين، سرعة رائعة، وتصميم يشجع على التعلم. شكراً ZERO.", project: "منصة تعليم إلكتروني", avatar: "ن", color: "from-yellow-500/20 to-orange-500/20" },
 ];
 
-const stats = [
-  { value: 30, suffix: "+", label: "عميل سعيد", icon: <Users size={20} />, color: "text-primary" },
-  { value: 100, suffix: "%", label: "معدل الرضا", icon: <Heart size={20} />, color: "text-red-400" },
-  { value: 52, suffix: "+", label: "مشروع ناجح", icon: <Award size={20} />, color: "text-yellow-400" },
-  { value: 4, suffix: ".9★", label: "متوسط التقييم", icon: <TrendingUp size={20} />, color: "text-green-400" },
-];
-
 export default function Clients() {
+  const t = useT();
   const fadeUp = { hidden: { opacity: 0, y: 24 }, visible: { opacity: 1, y: 0 } };
+
+  const stats = [
+    { value: 30, suffix: "+", label: t("clients.satisfiedClients"), icon: <Users size={20} />, color: "text-primary" },
+    { value: 100, suffix: "%", label: "معدل الرضا", icon: <Heart size={20} />, color: "text-red-400" },
+    { value: 52, suffix: "+", label: t("clients.projectsDelivered"), icon: <Award size={20} />, color: "text-yellow-400" },
+    { value: 4, suffix: ".9★", label: "متوسط التقييم", icon: <TrendingUp size={20} />, color: "text-green-400" },
+  ];
 
   return (
     <div className="min-h-screen">
@@ -32,8 +34,8 @@ export default function Clients() {
         <div className="container mx-auto px-4 relative z-10 text-center">
           <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}>
             <span className="font-mono text-primary text-xs tracking-widest uppercase mb-4 block">// clients.testimonials()</span>
-            <h1 className="text-5xl font-bold mb-4">آراء <span className="text-primary glow-cyan-text">العملاء</span></h1>
-            <p className="text-muted-foreground max-w-xl mx-auto text-lg">ليس مجرد كلام — نتائج حقيقية، عملاء حقيقيون</p>
+            <h1 className="text-5xl font-bold mb-4">{t("clients.title").split(" ").slice(0, -1).join(" ")} <span className="text-primary glow-cyan-text">{t("clients.title").split(" ").slice(-1)}</span></h1>
+            <p className="text-muted-foreground max-w-xl mx-auto text-lg">{t("clients.subtitle")}</p>
           </motion.div>
         </div>
       </section>
@@ -71,29 +73,29 @@ export default function Clients() {
             variants={{ visible: { transition: { staggerChildren: 0.08 } } }}
             className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6"
           >
-            {testimonials.map((t, i) => (
+            {testimonials.map((item, i) => (
               <motion.div key={i} variants={fadeUp} className="bg-card border border-border rounded-2xl p-6 hover:border-primary/40 transition-all group relative overflow-hidden">
-                <div className={`absolute inset-0 bg-gradient-to-br ${t.color} opacity-0 group-hover:opacity-100 transition-opacity`} />
+                <div className={`absolute inset-0 bg-gradient-to-br ${item.color} opacity-0 group-hover:opacity-100 transition-opacity`} />
                 <div className="relative z-10">
                   <Quote size={28} className="text-primary/20 mb-4" />
-                  <p className="text-sm text-foreground leading-relaxed mb-6">{t.text}</p>
+                  <p className="text-sm text-foreground leading-relaxed mb-6">{item.text}</p>
                   <div className="flex gap-0.5 mb-4">
-                    {Array.from({ length: t.rating }).map((_, i) => (
+                    {Array.from({ length: item.rating }).map((_, i) => (
                       <Star key={i} size={14} className="text-yellow-400 fill-yellow-400" />
                     ))}
                   </div>
                   <div className="flex items-center gap-3 pt-4 border-t border-border/50">
                     <div className="w-10 h-10 rounded-full bg-primary/20 border border-primary/30 flex items-center justify-center text-primary font-bold">
-                      {t.avatar}
+                      {item.avatar}
                     </div>
                     <div>
-                      <p className="font-semibold text-sm">{t.name}</p>
-                      <p className="text-xs text-muted-foreground">{t.company} · {t.role}</p>
+                      <p className="font-semibold text-sm">{item.name}</p>
+                      <p className="text-xs text-muted-foreground">{item.company} · {item.role}</p>
                     </div>
                   </div>
                   <div className="mt-3">
                     <span className="text-[10px] font-mono text-primary/60 bg-primary/5 border border-primary/10 px-2 py-0.5 rounded-full">
-                      {t.project}
+                      {item.project}
                     </span>
                   </div>
                 </div>
@@ -106,11 +108,11 @@ export default function Clients() {
       {/* CTA */}
       <section className="py-20 bg-card/30 border-t border-border">
         <div className="container mx-auto px-4 text-center">
-          <h2 className="text-3xl font-bold mb-4">أنت التالي في قائمة النجاحات</h2>
+          <h2 className="text-3xl font-bold mb-4">{t("clients.testimonialsTitle")}</h2>
           <p className="text-muted-foreground mb-8 max-w-lg mx-auto">انضم لعائلة ZERO وابدأ رحلة مشروعك الرقمي</p>
           <a href="https://chat.whatsapp.com/LkJJ5CIyE0mFdFIupB33J9" target="_blank" rel="noopener noreferrer"
             className="inline-flex items-center gap-2 bg-primary text-primary-foreground px-8 py-3 rounded-xl font-mono text-sm hover:bg-primary/90 glow-cyan transition-all">
-            ابدأ معي اليوم ←
+            {t("clients.channels")} ←
           </a>
         </div>
       </section>

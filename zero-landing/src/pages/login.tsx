@@ -27,8 +27,8 @@ export default function Login() {
       const result = await login(email, password);
       setLoading(false);
       if (result.success) {
-        const adminEmails = ["zeru50549@gmail.com", "zero_admin"];
-        if (adminEmails.includes(email.trim())) {
+        // Navigate based on user role from API response (no hardcoded emails)
+        if (result.user?.role === "admin") {
           navigate("/admin");
         } else {
           navigate("/");

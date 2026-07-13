@@ -2,7 +2,7 @@ import { motion } from "framer-motion";
 import { Tag, Plus, Zap, Bug, Wrench } from "lucide-react";
 import { Navbar } from "@/components/layout/Navbar";
 import { Footer } from "@/components/layout/Footer";
-import { useI18n } from "@/contexts/i18n-context";
+import { useI18n, useT } from "@/contexts/i18n-context";
 
 const releases = [
   {
@@ -78,10 +78,10 @@ const releases = [
 ];
 
 const typeConfig = {
-  new: { icon: Plus, color: "text-green-400", bg: "bg-green-400/10 border-green-400/20", label: "جديد" },
-  improve: { icon: Zap, color: "text-primary", bg: "bg-primary/10 border-primary/20", label: "تحسين" },
-  fix: { icon: Bug, color: "text-red-400", bg: "bg-red-400/10 border-red-400/20", label: "إصلاح" },
-  change: { icon: Wrench, color: "text-yellow-400", bg: "bg-yellow-400/10 border-yellow-400/20", label: "تغيير" },
+  new: { icon: Plus, color: "text-green-400", bg: "bg-green-400/10 border-green-400/20", labelKey: "changelog.features" },
+  improve: { icon: Zap, color: "text-primary", bg: "bg-primary/10 border-primary/20", labelKey: "changelog.improvements" },
+  fix: { icon: Bug, color: "text-red-400", bg: "bg-red-400/10 border-red-400/20", labelKey: "changelog.fixes" },
+  change: { icon: Wrench, color: "text-yellow-400", bg: "bg-yellow-400/10 border-yellow-400/20", labelKey: "changelog.breaking" },
 };
 
 const labelConfig = {
@@ -92,6 +92,7 @@ const labelConfig = {
 
 export default function Changelog() {
   const { dir } = useI18n();
+  const t = useT();
   return (
     <div className="min-h-screen bg-background text-foreground" dir={dir}>
       <Navbar />
@@ -103,9 +104,9 @@ export default function Changelog() {
             <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}>
               <p className="font-mono text-xs text-primary mb-3">()CHANGELOG.HISTORY //</p>
               <h1 className="text-4xl md:text-5xl font-bold mb-4">
-                سجل <span className="text-primary">التغييرات</span>
+                {t("changelog.titlePrefix")} <span className="text-primary">{t("changelog.title")}</span>
               </h1>
-              <p className="text-muted-foreground text-lg">تاريخ كامل لكل تحديث وتطوير في منظومة ZERO</p>
+              <p className="text-muted-foreground text-lg">{t("changelog.subtitle")}</p>
             </motion.div>
           </div>
         </section>
@@ -127,7 +128,7 @@ export default function Changelog() {
                     <Tag size={14} className="text-primary" />
                     <span className="font-mono font-bold text-foreground">{rel.version}</span>
                     <span className={`text-[10px] font-mono px-2 py-0.5 rounded-full border capitalize ${labelConfig[rel.label as keyof typeof labelConfig]}`}>
-                      {rel.label === "latest" ? "الأحدث" : rel.label === "stable" ? "مستقر" : "قديم"}
+                      {rel.label === "latest" ? t("changelog.latest") : rel.label === "stable" ? t("changelog.stable") : t("changelog.legacy")}
                     </span>
                   </div>
                   <span className="text-xs text-muted-foreground font-mono">{rel.date}</span>
@@ -136,12 +137,12 @@ export default function Changelog() {
                 {/* Changes */}
                 <div className="p-5 space-y-2">
                   {rel.changes.map((change, j) => {
-                    const t = typeConfig[change.type as keyof typeof typeConfig];
+                    const cfg = typeConfig[change.type as keyof typeof typeConfig];
                     return (
                       <div key={j} className="flex items-start gap-3">
-                        <span className={`flex items-center gap-1 text-[10px] font-mono px-2 py-0.5 rounded border flex-shrink-0 mt-0.5 ${t.bg}`}>
-                          <t.icon size={9} className={t.color} />
-                          <span className={t.color}>{t.label}</span>
+                        <span className={`flex items-center gap-1 text-[10px] font-mono px-2 py-0.5 rounded border flex-shrink-0 mt-0.5 ${cfg.bg}`}>
+                          <cfg.icon size={9} className={cfg.color} />
+                          <span className={cfg.color}>{t(cfg.labelKey as any)}</span>
                         </span>
                         <span className="text-sm text-muted-foreground">{change.text}</span>
                       </div>

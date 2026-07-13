@@ -5,7 +5,7 @@ import { Navbar } from "@/components/layout/Navbar";
 import { Footer } from "@/components/layout/Footer";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { useI18n } from "@/contexts/i18n-context";
+import { useI18n, useT } from "@/contexts/i18n-context";
 
 const resources = [
   {
@@ -106,12 +106,19 @@ const resources = [
   },
 ];
 
-const categories = ["الكل", "قوالب", "أدلة", "مكونات", "مراجع"];
-
 export default function Resources() {
   const { dir } = useI18n();
+  const t = useT();
   const [cat, setCat] = useState("الكل");
   const [search, setSearch] = useState("");
+
+  const categoriesList = [
+    { value: "الكل", label: t("resources.catAll") },
+    { value: "قوالب", label: t("resources.catTemplates") },
+    { value: "أدلة", label: t("resources.catGuides") },
+    { value: "مكونات", label: t("resources.catCheatSheets") },
+    { value: "مراجع", label: t("resources.catVideos") },
+  ];
 
   const filtered = resources.filter((r) => {
     const matchCat = cat === "الكل" || r.category === cat;
@@ -130,14 +137,14 @@ export default function Resources() {
             <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}>
               <p className="font-mono text-xs text-primary mb-3">()RESOURCES.FREE //</p>
               <h1 className="text-4xl md:text-5xl font-bold mb-4">
-                <span className="text-primary">موارد</span> مجانية
+                <span className="text-primary">{t("resources.title")}</span> {t("resources.free")}
               </h1>
               <p className="text-muted-foreground text-lg mb-6">
-                قوالب، أدلة، ومكونات من تجربتي الحقيقية — مجاناً 100%
+                {t("resources.subtitle")}
               </p>
               <div className="grid grid-cols-3 gap-4 max-w-sm mx-auto">
-                {[["8+", "موارد"], ["11K+", "تنزيل"], ["4.9", "تقييم"]].map(([v, l]) => (
-                  <div key={l} className="bg-card border border-border rounded-xl p-3">
+                {[["8+", t("resources.resourcesCount")], ["11K+", t("resources.downloadsCount")], ["4.9", t("resources.ratingLabel")]].map(([v, l]) => (
+                  <div key={String(l)} className="bg-card border border-border rounded-xl p-3">
                     <div className="text-xl font-bold text-primary font-mono">{v}</div>
                     <div className="text-xs text-muted-foreground">{l}</div>
                   </div>
@@ -153,20 +160,20 @@ export default function Resources() {
             <div className="relative flex-1">
               <Search size={15} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
               <Input
-                placeholder="ابحث في الموارد..."
+                placeholder={t("resources.searchPlaceholder")}
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 className="bg-card border-border pr-10"
               />
             </div>
             <div className="flex gap-2">
-              {categories.map((c) => (
+              {categoriesList.map((c) => (
                 <button
-                  key={c}
-                  onClick={() => setCat(c)}
-                  className={`px-3 py-2 rounded-lg text-sm font-medium transition-all ${cat === c ? "bg-primary text-primary-foreground" : "bg-card border border-border text-muted-foreground hover:border-primary/50"}`}
+                  key={c.value}
+                  onClick={() => setCat(c.value)}
+                  className={`px-3 py-2 rounded-lg text-sm font-medium transition-all ${cat === c.value ? "bg-primary text-primary-foreground" : "bg-card border border-border text-muted-foreground hover:border-primary/50"}`}
                 >
-                  {c}
+                  {c.label}
                 </button>
               ))}
             </div>
@@ -194,7 +201,7 @@ export default function Resources() {
                         <h3 className="font-semibold text-foreground text-sm">{r.title}</h3>
                         {r.free && (
                           <span className="text-[10px] font-mono text-green-400 bg-green-400/10 border border-green-400/20 px-2 py-0.5 rounded-full flex-shrink-0">
-                            مجاني
+                            {t("resources.free")}
                           </span>
                         )}
                       </div>
@@ -213,7 +220,7 @@ export default function Resources() {
                         </div>
                         <Button size="sm" className="bg-primary text-primary-foreground hover:bg-primary/90 text-xs h-7 px-3 font-mono glow-cyan">
                           <Download size={11} className="ml-1" />
-                          تنزيل
+                          {t("resources.download")}
                         </Button>
                       </div>
                     </div>

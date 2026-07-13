@@ -120,62 +120,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
-  const login = (email: string, password: string): { success: boolean; error?: string } => {
-    // Sync wrapper kept for backwards compatibility — prefer loginAsync() instead.
-    let result: { success: boolean; error?: string } = { success: false, error: "جاري الاتصال..." };
-    apiPost<{ token: string; user: User }>("/auth/login", { email, password })
-      .then((res) => {
-        setToken(res.token);
-        setUser(res.user);
-        localStorage.setItem(AUTH_KEY, JSON.stringify(res.user));
-        result = { success: true };
-        setUser({ ...res.user });
-      })
-      .catch((e) => {
-        result = { success: false, error: e.message };
-        setUser(null);
-      });
-    return result;
-  };
-
-  // Async login — preferred
-  const loginAsync = async (email: string, password: string): Promise<{ success: boolean; error?: string }> => {
+  const login = async (email: string, password: string): Promise<{ success: boolean; error?: string; user?: User }> => {
     try {
       const res = await apiPost<{ token: string; user: User }>("/auth/login", { email, password });
       setToken(res.token);
       setUser(res.user);
       localStorage.setItem(AUTH_KEY, JSON.stringify(res.user));
-      return { success: true };
+      return { success: true, user: res.user };
     } catch (e: any) {
       return { success: false, error: e.message };
     }
   };
 
-  const register = (name: string, email: string, password: string): { success: boolean; error?: string } => {
-    let result: { success: boolean; error?: string } = { success: false, error: "جاري الاتصال..." };
-    apiPost<{ token: string; user: User }>("/auth/register", { name, email, password })
-      .then((res) => {
-        setToken(res.token);
-        setUser(res.user);
-        localStorage.setItem(AUTH_KEY, JSON.stringify(res.user));
-        result = { success: true };
-        setUser({ ...res.user });
-      })
-      .catch((e) => {
-        result = { success: false, error: e.message };
-        setUser(null);
-      });
-    return result;
-  };
-
-  // Async register — preferred
-  const registerAsync = async (name: string, email: string, password: string): Promise<{ success: boolean; error?: string }> => {
+  const register = async (name: string, email: string, password: string): Promise<{ success: boolean; error?: string; user?: User }> => {
     try {
       const res = await apiPost<{ token: string; user: User }>("/auth/register", { name, email, password });
       setToken(res.token);
       setUser(res.user);
       localStorage.setItem(AUTH_KEY, JSON.stringify(res.user));
-      return { success: true };
+      return { success: true, user: res.user };
     } catch (e: any) {
       return { success: false, error: e.message };
     }

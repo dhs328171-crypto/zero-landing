@@ -59,7 +59,7 @@ export default function LinkRedirect() {
         try {
           // Try to parse the structured error
           const msg = e.message || "";
-          if (msg.includes("محمي بكلمة مرور")) {
+          if (msg.includes("محمي بكلمة مرور") || msg.includes("password protected") || msg.includes("password_protected")) {
             setError({ error: msg, requiresPassword: true });
           } else {
             setError({ error: msg });

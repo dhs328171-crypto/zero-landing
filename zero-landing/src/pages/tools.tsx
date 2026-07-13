@@ -3,6 +3,7 @@ import { Navbar } from "@/components/layout/Navbar";
 import { Footer } from "@/components/layout/Footer";
 import { motion } from "framer-motion";
 import { ExternalLink, Search, Star, Code2, Palette, Database, Terminal, Cpu, Smartphone, Zap, Globe, Shield, BarChart3, GitBranch, Package, Layers } from "lucide-react";
+import { useT } from "@/contexts/i18n-context";
 
 type Tool = {
   name: string;
@@ -48,19 +49,27 @@ const tools: Tool[] = [
   { name: "React Native", desc: "المعيار الذهبي لبناء تطبيقات جوال بـ JavaScript.", url: "https://reactnative.dev", category: "موبايل", rating: 4.7, free: true, tags: ["Mobile", "Cross-platform"], color: "text-cyan-400", icon: <Smartphone size={22} className="text-cyan-400" /> },
 ];
 
-const categories = ["الكل", "تطوير", "تصميم", "ذكاء اصطناعي", "الأداء", "موبايل"];
-
 export default function Tools() {
+  const t = useT();
   const [search, setSearch] = useState("");
   const [activeCategory, setActiveCategory] = useState("الكل");
 
-  const filtered = tools.filter((t) => {
-    const matchCat = activeCategory === "الكل" || t.category === activeCategory;
-    const matchSearch = !search || t.name.toLowerCase().includes(search.toLowerCase()) || t.desc.includes(search) || t.tags.some((tag) => tag.toLowerCase().includes(search.toLowerCase()));
+  const categoriesList = [
+    { value: "الكل", label: t("tools.catAll") },
+    { value: "تطوير", label: t("tools.catFrontend") },
+    { value: "تصميم", label: t("tools.catBackend") },
+    { value: "ذكاء اصطناعي", label: t("tools.catDevops") },
+    { value: "الأداء", label: t("tools.catDesign") },
+    { value: "موبايل", label: t("tools.catAI") },
+  ];
+
+  const filtered = tools.filter((tool) => {
+    const matchCat = activeCategory === "الكل" || tool.category === activeCategory;
+    const matchSearch = !search || tool.name.toLowerCase().includes(search.toLowerCase()) || tool.desc.includes(search) || tool.tags.some((tag) => tag.toLowerCase().includes(search.toLowerCase()));
     return matchCat && matchSearch;
   });
 
-  const hotTools = tools.filter((t) => t.hot);
+  const hotTools = tools.filter((tool) => tool.hot);
 
   return (
     <div className="min-h-screen">
@@ -71,8 +80,8 @@ export default function Tools() {
         <div className="container mx-auto px-4 relative z-10 text-center">
           <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}>
             <span className="font-mono text-primary text-xs tracking-widest uppercase mb-4 block">// tools.curated()</span>
-            <h1 className="text-5xl font-bold mb-4">أدوات <span className="text-primary glow-cyan-text">المطور</span></h1>
-            <p className="text-muted-foreground max-w-xl mx-auto text-lg">{tools.length}+ أداة مختارة بعناية من قِبَل ZERO — ترافقني في كل مشروع</p>
+            <h1 className="text-5xl font-bold mb-4">{t("tools.title")} <span className="text-primary glow-cyan-text">{t("tools.titleHighlight")}</span></h1>
+            <p className="text-muted-foreground max-w-xl mx-auto text-lg">{tools.length}+ {t("tools.subtitle")}</p>
           </motion.div>
         </div>
       </section>
@@ -81,14 +90,14 @@ export default function Tools() {
       <div className="container mx-auto px-4 mb-10">
         <div className="flex items-center gap-2 mb-4">
           <Zap size={16} className="text-orange-400" />
-          <span className="font-mono text-sm text-orange-400">الأدوات الأكثر استخداماً</span>
+          <span className="font-mono text-sm text-orange-400">{t("tools.hotTools")}</span>
         </div>
         <div className="flex gap-3 overflow-x-auto pb-2">
-          {hotTools.map((t, i) => (
-            <a key={i} href={t.url} target="_blank" rel="noopener noreferrer"
+          {hotTools.map((tool, i) => (
+            <a key={i} href={tool.url} target="_blank" rel="noopener noreferrer"
               className="flex-shrink-0 flex items-center gap-2.5 bg-card border border-orange-400/20 hover:border-orange-400/50 rounded-xl px-4 py-2.5 transition-all hover:scale-[1.02]">
-              {t.icon}
-              <span className="text-sm font-medium whitespace-nowrap">{t.name}</span>
+              {tool.icon}
+              <span className="text-sm font-medium whitespace-nowrap">{tool.name}</span>
               <span className="text-[10px] font-mono bg-orange-400/10 text-orange-400 px-1.5 py-0.5 rounded">🔥</span>
             </a>
           ))}
@@ -103,22 +112,22 @@ export default function Tools() {
             <input
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              placeholder="ابحث عن أداة..."
+              placeholder={t("tools.searchPlaceholder")}
               className="w-full bg-card border border-border rounded-xl pr-9 pl-4 py-2.5 text-sm focus:outline-none focus:border-primary transition-all"
             />
           </div>
           <div className="flex gap-2 overflow-x-auto pb-1 w-full sm:w-auto">
-            {categories.map((cat) => (
+            {categoriesList.map((cat) => (
               <button
-                key={cat}
-                onClick={() => setActiveCategory(cat)}
+                key={cat.value}
+                onClick={() => setActiveCategory(cat.value)}
                 className={`flex-shrink-0 px-4 py-2 rounded-full text-xs font-mono transition-all border ${
-                  activeCategory === cat
+                  activeCategory === cat.value
                     ? "bg-primary text-primary-foreground border-primary glow-cyan"
                     : "border-border text-muted-foreground hover:border-primary/50"
                 }`}
               >
-                {cat}
+                {cat.label}
               </button>
             ))}
           </div>
@@ -128,7 +137,7 @@ export default function Tools() {
       {/* Tools Grid */}
       <section className="pb-24">
         <div className="container mx-auto px-4">
-          <p className="text-xs text-muted-foreground font-mono mb-6">// عرض {filtered.length} أداة</p>
+          <p className="text-xs text-muted-foreground font-mono mb-6">// {filtered.length} {t("tools.toolsCount")}</p>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
             {filtered.map((tool, i) => (
               <motion.a
@@ -151,9 +160,9 @@ export default function Tools() {
                       <span className="text-[10px] font-mono bg-orange-400/10 text-orange-400 border border-orange-400/20 px-1.5 py-0.5 rounded">🔥</span>
                     )}
                     {tool.free ? (
-                      <span className="text-[10px] font-mono bg-green-400/10 text-green-400 border border-green-400/20 px-1.5 py-0.5 rounded">مجاني</span>
+                      <span className="text-[10px] font-mono bg-green-400/10 text-green-400 border border-green-400/20 px-1.5 py-0.5 rounded">{t("tools.free")}</span>
                     ) : (
-                      <span className="text-[10px] font-mono bg-yellow-400/10 text-yellow-400 border border-yellow-400/20 px-1.5 py-0.5 rounded">مدفوع</span>
+                      <span className="text-[10px] font-mono bg-yellow-400/10 text-yellow-400 border border-yellow-400/20 px-1.5 py-0.5 rounded">{t("tools.paid")}</span>
                     )}
                   </div>
                 </div>
@@ -179,7 +188,7 @@ export default function Tools() {
 
           {filtered.length === 0 && (
             <div className="text-center py-20">
-              <p className="text-muted-foreground font-mono">// لا توجد أدوات تطابق البحث</p>
+              <p className="text-muted-foreground font-mono">// {t("tools.noResults")}</p>
             </div>
           )}
         </div>

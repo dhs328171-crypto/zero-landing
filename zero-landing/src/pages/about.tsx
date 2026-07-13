@@ -4,8 +4,8 @@ import { motion } from "framer-motion";
 import { Counter } from "@/components/ui/counter";
 import { TiltCard } from "@/components/ui/tilt-card";
 import { Link } from "wouter";
-import { Download, Award, MapPin, Calendar, Coffee, Code2, Zap, Heart } from "lucide-react";
-import { useT, useI18n } from "@/contexts/i18n-context";
+import { Download, MapPin, Calendar, Coffee, Code2, Zap, Heart } from "lucide-react";
+import { useT } from "@/contexts/i18n-context";
 import { useStats } from "@/lib/queries";
 import { SiReact, SiNextdotjs, SiTypescript, SiNodedotjs, SiTailwindcss, SiMongodb, SiPostgresql, SiGit, SiFirebase, SiDocker, SiPython, SiFigma } from "react-icons/si";
 
@@ -33,28 +33,24 @@ const techStack = [
   { icon: <SiFigma size={28} className="text-purple-400" />, name: "Figma" },
 ];
 
-const timeline = [
-  { year: "2019", title: "بداية الرحلة", desc: "بدأت تعلم البرمجة ذاتياً وبنيت أولى مواقعي الشخصية. الشغف بالكود كان أكبر من أي تحدٍّ.", icon: "🚀" },
-  { year: "2020", title: "أول مشروع حقيقي", desc: "أطلقت أول مشروع لعميل حقيقي — متجر صغير تحوّل إلى نقطة انطلاق لمسيرة كاملة.", icon: "💡" },
-  { year: "2021", title: "التخصص والتعمق", desc: "تعمقت في React و Node.js وبنيت 15+ مشروعاً متنوعاً. بدأت أفهم معنى الكود النظيف.", icon: "⚡" },
-  { year: "2022", title: "الانطلاق المهني", desc: "أطلقت ZERO كعلامة احترافية. توسعت في Full Stack وبدأت أخدم عملاء من دول متعددة.", icon: "🎯" },
-  { year: "2023", title: "مرحلة النضج", desc: "50+ مشروع مكتمل، 18 عميل نشط، وسمعة بُنيت على الجودة والالتزام قبل أي شيء آخر.", icon: "🏆" },
-  { year: "2024", title: "الأفق الجديد", desc: "إطلاق منتجات SaaS خاصة، توسع في الأسواق الخليجية، ورفع المعايير التقنية باستمرار.", icon: "🌟" },
-  { year: "2025", title: "ZERO v2.0", desc: "إعادة هيكلة كاملة لـ ZERO، إطلاق منصة المجتمع التقني، وتوسع إلى السوق الخليجي الشامل.", icon: "🔮" },
-  { year: "2026", title: "الحاضر والمستقبل", desc: "52+ مشروع مكتمل. نحن الآن في Q2 2026 ونبني API عام للمطورين ونواصل التميز.", icon: "🚀" },
-];
-
-const values = [
-  { icon: <Code2 size={20} className="text-primary" />, title: "الكود النظيف", desc: "أكتب كوداً يفهمه أي مطور آخر ويصمد أمام الزمن." },
-  { icon: <Zap size={20} className="text-yellow-400" />, title: "الأداء أولاً", desc: "موقع بطيء = عميل مفقود. الأداء ليس خياراً بل ضرورة." },
-  { icon: <Heart size={20} className="text-red-400" />, title: "العميل شريك", desc: "لا أنفذ طلبات بشكل أعمى — أفكر معك في الحل الأمثل." },
-  { icon: <Award size={20} className="text-green-400" />, title: "التميز دائماً", desc: "كل مشروع يحمل اسمي، لذا أضع فيه أفضل ما لديّ." },
-];
-
 export default function About() {
   const t = useT();
   const statsQ = useStats();
   const fadeUp = { hidden: { opacity: 0, y: 24 }, visible: { opacity: 1, y: 0 } };
+
+  const timeline = [
+    { year: t("about.timeline1Year"), title: t("about.timeline1Title"), desc: t("about.timeline1Desc"), icon: "🚀" },
+    { year: t("about.timeline2Year"), title: t("about.timeline2Title"), desc: t("about.timeline2Desc"), icon: "💡" },
+    { year: t("about.timeline3Year"), title: t("about.timeline3Title"), desc: t("about.timeline3Desc"), icon: "⚡" },
+    { year: t("about.timeline4Year"), title: t("about.timeline4Title"), desc: t("about.timeline4Desc"), icon: "🎯" },
+    { year: t("about.timeline5Year"), title: t("about.timeline5Title"), desc: t("about.timeline5Desc"), icon: "🏆" },
+  ];
+
+  const values = [
+    { icon: <Code2 size={20} className="text-primary" />, title: t("about.val1Title"), desc: t("about.val1Desc") },
+    { icon: <Zap size={20} className="text-yellow-400" />, title: t("about.val2Title"), desc: t("about.val2Desc") },
+    { icon: <Heart size={20} className="text-red-400" />, title: t("about.val3Title"), desc: t("about.val3Desc") },
+  ];
 
   return (
     <div className="min-h-screen">
@@ -220,7 +216,7 @@ export default function About() {
         <div className="container mx-auto px-4 max-w-4xl">
           <div className="text-center mb-14">
             <span className="font-mono text-primary text-xs tracking-widest uppercase mb-3 block">// core.values()</span>
-            <h2 className="text-3xl font-bold">مبادئي <span className="text-primary glow-cyan-text">المهنية</span></h2>
+            <h2 className="text-3xl font-bold">{t("about.values")} <span className="text-primary glow-cyan-text">{t("about.valuesSub")}</span></h2>
           </div>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
             {values.map((v, i) => (
@@ -248,7 +244,7 @@ export default function About() {
         <div className="container mx-auto px-4 max-w-3xl">
           <div className="text-center mb-14">
             <span className="font-mono text-primary text-xs tracking-widest uppercase mb-3 block">// career.timeline()</span>
-            <h2 className="text-3xl font-bold">رحلة <span className="text-primary glow-cyan-text">ZERO</span></h2>
+            <h2 className="text-3xl font-bold">{t("about.experience")} <span className="text-primary glow-cyan-text">ZERO</span></h2>
           </div>
           <div className="relative">
             <div className="absolute right-6 top-0 bottom-0 w-px bg-gradient-to-b from-primary/50 via-primary/20 to-transparent" />
@@ -282,10 +278,10 @@ export default function About() {
       {/* CTA */}
       <section className="py-20 border-t border-border">
         <div className="container mx-auto px-4 text-center">
-          <h2 className="text-3xl font-bold mb-4">هل تريد العمل معي؟</h2>
-          <p className="text-muted-foreground mb-8 max-w-lg mx-auto">تواصل الآن ونبدأ رحلة بناء مشروعك الرقمي</p>
+          <h2 className="text-3xl font-bold mb-4">{t("about.contactTitle")}</h2>
+          <p className="text-muted-foreground mb-8 max-w-lg mx-auto">{t("about.contactSubtitle")}</p>
           <a href="https://chat.whatsapp.com/LkJJ5CIyE0mFdFIupB33J9" target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-2 bg-primary text-primary-foreground px-8 py-3 rounded-xl font-mono text-sm hover:bg-primary/90 glow-cyan transition-all">
-            تواصل معي ←
+            {t("about.contactButton")} ←
           </a>
         </div>
       </section>

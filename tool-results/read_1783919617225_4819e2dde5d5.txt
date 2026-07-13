@@ -1,0 +1,949 @@
+     1→/**
+     2→ * Admin File System API — secure, admin-only routes for reading/writing
+     3→ * project source code. Provides Termux-like file management capabilities.
+     4→ *
+     5→ * SECURITY:
+     6→ *   - All routes require admin authentication
+     7→ *   - Rate-limited to prevent brute-force or abuse
+     8→ *   - Full audit logging of every file operation
+     9→ *   - Path traversal prevention (no ../ allowed)
+    10→ *   - Restricted to project root only
+    11→ *   - Backup before overwrite
+    12→ *
+    13→ * ENHANCED:
+    14→ *   - npm package management (install, uninstall, list)
+    15→ *   - git integration (status, log, diff, commit, push, pull)
+    16→ *   - Server deploy (build, restart)
+    17→ *   - Package.json reader/writer
+    18→ *   - Full directory tree with recursive listing
+    19→ *   - Find & replace across files
+    20→ *   - Download project as zip
+    21→ */
+    22→
+    23→import { Router } from "express";
+    24→import fs from "node:fs";
+    25→import path from "node:path";
+    26→import { exec, execSync } from "node:child_process";
+    27→import { promisify } from "node:util";
+    28→import { AuthedRequest, adminRequired } from "../middleware/auth.js";
+    29→import { recordSecurityEvent, getClientIp } from "../lib/audit.js";
+    30→import { prisma } from "../lib/prisma.js";
+    31→
+    32→const router = Router();
+    33→const execAsync = promisify(exec);
+    34→
+    35→// ---------------------------------------------------------------------------
+    36→//  Project root — the ONLY directory we allow access to
+    37→// ---------------------------------------------------------------------------
+    38→const PROJECT_ROOT = path.resolve(process.cwd(), "..");
+    39→
+    40→/** Normalize a user-supplied path and ensure it stays inside PROJECT_ROOT. */
+    41→function safePath(rel: string): string | null {
+    42→  // Decode URI
+    43→  const decoded = decodeURIComponent(rel);
+    44→  // Block path traversal
+    45→  if (decoded.includes("..")) return null;
+    46→  // Resolve and verify it's inside PROJECT_ROOT
+    47→  const resolved = path.resolve(PROJECT_ROOT, decoded);
+    48→  if (!resolved.startsWith(PROJECT_ROOT + path.sep) && resolved !== PROJECT_ROOT) return null;
+    49→  return resolved;
+    50→}
+    51→
+    52→/** Get relative path from project root */
+    53→function relPath(abs: string): string {
+    54→  return path.relative(PROJECT_ROOT, abs);
+    55→}
+    56→
+    57→/** Determine if a path should be hidden / denied */
+    58→function isDenied(p: string): boolean {
+    59→  const denyList = [".env", ".git", "node_modules", "dev.db"];
+    60→  return denyList.some((d) => p.includes(d));
+    61→}
+    62→
+    63→/** Audit helper */
+    64→async function auditLog(req: AuthedRequest, action: string, detail: string) {
+    65→  try {
+    66→    await prisma.auditLog.create({
+    67→      data: {
+    68→        actorId: req.user?.id || null,
+    69→        actorEmail: req.user?.email || "unknown",
+    70→        action: `file:${action}`,
+    71→        target: detail,
+    72→        ip: getClientIp(req),
+    73→        userAgent: req.headers["user-agent"] || "",
+    74→      },
+    75→    });
+    76→  } catch {}
+    77→  try {
+    78→    await recordSecurityEvent({
+    79→      type: "admin_file_op",
+    80→      severity: "info",
+    81→      ip: getClientIp(req),
+    82→      path: req.path,
+    83→      detail: `${req.user?.email} ${action} ${detail}`,
+    84→    });
+    85→  } catch {}
+    86→}
+    87→
+    88→// ---------------------------------------------------------------------------
+    89→//  GET /api/admin/files/tree — list directory tree
+    90→// ---------------------------------------------------------------------------
+    91→router.get("/tree", adminRequired, async (req: AuthedRequest, res) => {
+    92→  const dir = req.query.dir as string || "";
+    93→  const safe = safePath(dir);
+    94→  if (!safe) return res.status(400).json({ error: "مسار غير صالح" });
+    95→
+    96→  try {
+    97→    if (!fs.existsSync(safe)) return res.status(404).json({ error: "المجلد غير موجود" });
+    98→    const stat = fs.statSync(safe);
+    99→    if (!stat.isDirectory()) return res.status(400).json({ error: "المسار ليس مجلد" });
+   100→
+   101→    const entries = fs.readdirSync(safe, { withFileTypes: true });
+   102→    const items = entries
+   103→      .filter((e) => !e.name.startsWith(".") && e.name !== "node_modules" && e.name !== "dev.db")
+   104→      .map((e) => {
+   105→        const fullPath = path.join(safe, e.name);
+   106→        const rel = relPath(fullPath);
+   107→        try {
+   108→          const s = fs.statSync(fullPath);
+   109→          return {
+   110→            name: e.name,
+   111→            path: rel,
+   112→            type: e.isDirectory() ? "directory" : "file",
+   113→            size: s.size,
+   114→            modified: s.mtime.toISOString(),
+   115→            extension: e.isFile() ? path.extname(e.name).toLowerCase() : null,
+   116→          };
+   117→        } catch {
+   118→          return null;
+   119→        }
+   120→      })
+   121→      .filter(Boolean)
+   122→      .sort((a: any, b: any) => {
+   123→        // Directories first, then alphabetical
+   124→        if (a.type !== b.type) return a.type === "directory" ? -1 : 1;
+   125→        return a.name.localeCompare(b.name);
+   126→      });
+   127→
+   128→    await auditLog(req, "list", dir || "/");
+   129→    res.json({ items, cwd: dir || "/", root: relPath(PROJECT_ROOT) });
+   130→  } catch (e: any) {
+   131→    res.status(500).json({ error: "خطأ في قراءة المجلد" });
+   132→  }
+   133→});
+   134→
+   135→// ---------------------------------------------------------------------------
+   136→//  GET /api/admin/files/full-tree — recursive full directory tree
+   137→// ---------------------------------------------------------------------------
+   138→router.get("/full-tree", adminRequired, async (req: AuthedRequest, res) => {
+   139→  try {
+   140→    const maxDepth = Number(req.query.depth) || 3;
+   141→    function buildTree(dirPath: string, depth: number): any[] {
+   142→      if (depth <= 0) return [];
+   143→      try {
+   144→        const entries = fs.readdirSync(dirPath, { withFileTypes: true });
+   145→        return entries
+   146→          .filter((e) => !e.name.startsWith(".") && e.name !== "node_modules" && e.name !== "dev.db" && e.name !== "dist" && e.name !== ".backups")
+   147→          .sort((a, b) => {
+   148→            if (a.isDirectory() && !b.isDirectory()) return -1;
+   149→            if (!a.isDirectory() && b.isDirectory()) return 1;
+   150→            return a.name.localeCompare(b.name);
+   151→          })
+   152→          .map((e) => {
+   153→            const fullPath = path.join(dirPath, e.name);
+   154→            const rel = relPath(fullPath);
+   155→            try {
+   156→              const s = fs.statSync(fullPath);
+   157→              const entry: any = {
+   158→                name: e.name,
+   159→                path: rel,
+   160→                type: e.isDirectory() ? "directory" : "file",
+   161→                size: s.size,
+   162→                modified: s.mtime.toISOString(),
+   163→                extension: e.isFile() ? path.extname(e.name).toLowerCase() : null,
+   164→              };
+   165→              if (e.isDirectory()) {
+   166→                entry.children = buildTree(fullPath, depth - 1);
+   167→              }
+   168→              return entry;
+   169→            } catch {
+   170→              return null;
+   171→            }
+   172→          })
+   173→          .filter(Boolean);
+   174→      } catch {
+   175→        return [];
+   176→      }
+   177→    }
+   178→    const tree = buildTree(PROJECT_ROOT, maxDepth);
+   179→    await auditLog(req, "full-tree", `depth=${maxDepth}`);
+   180→    res.json({ tree, root: relPath(PROJECT_ROOT) });
+   181→  } catch (e: any) {
+   182→    res.status(500).json({ error: "خطأ في بناء شجرة الملفات" });
+   183→  }
+   184→});
+   185→
+   186→// ---------------------------------------------------------------------------
+   187→//  GET /api/admin/files/read — read file content
+   188→// ---------------------------------------------------------------------------
+   189→router.get("/read", adminRequired, async (req: AuthedRequest, res) => {
+   190→  const file = req.query.file as string;
+   191→  if (!file) return res.status(400).json({ error: "يجب تحديد الملف" });
+   192→  const safe = safePath(file);
+   193→  if (!safe) return res.status(400).json({ error: "مسار غير صالح" });
+   194→  if (isDenied(safe)) return res.status(403).json({ error: "الوصول لهذا الملف ممنوع" });
+   195→
+   196→  try {
+   197→    if (!fs.existsSync(safe)) return res.status(404).json({ error: "الملف غير موجود" });
+   198→    const stat = fs.statSync(safe);
+   199→    if (stat.isDirectory()) return res.status(400).json({ error: "المسار هو مجلد وليس ملف" });
+   200→
+   201→    // Limit file size to 2MB for safety
+   202→    if (stat.size > 2 * 1024 * 1024) return res.status(413).json({ error: "الملف كبير جداً (أكثر من 2MB)" });
+   203→
+   204→    const content = fs.readFileSync(safe, "utf-8");
+   205→    await auditLog(req, "read", file);
+   206→
+   207→    res.json({
+   208→      content,
+   209→      path: file,
+   210→      size: stat.size,
+   211→      modified: stat.mtime.toISOString(),
+   212→      extension: path.extname(safe).toLowerCase(),
+   213→    });
+   214→  } catch (e: any) {
+   215→    res.status(500).json({ error: "خطأ في قراءة الملف" });
+   216→  }
+   217→});
+   218→
+   219→// ---------------------------------------------------------------------------
+   220→//  PUT /api/admin/files/write — write / update file content
+   221→// ---------------------------------------------------------------------------
+   222→router.put("/write", adminRequired, async (req: AuthedRequest, res) => {
+   223→  const { file, content } = req.body;
+   224→  if (!file || content === undefined) return res.status(400).json({ error: "يجب تحديد الملف والمحتوى" });
+   225→  const safe = safePath(file);
+   226→  if (!safe) return res.status(400).json({ error: "مسار غير صالح" });
+   227→  if (isDenied(safe)) return res.status(403).json({ error: "الوصول لهذا الملف ممنوع" });
+   228→
+   229→  try {
+   230→    // Backup existing file before overwrite
+   231→    if (fs.existsSync(safe)) {
+   232→      const backupDir = path.resolve(PROJECT_ROOT, ".backups");
+   233→      if (!fs.existsSync(backupDir)) fs.mkdirSync(backupDir, { recursive: true });
+   234→      const ts = Date.now();
+   235→      const backupName = `${path.basename(safe)}.${ts}.bak`;
+   236→      fs.copyFileSync(safe, path.join(backupDir, backupName));
+   237→    }
+   238→
+   239→    // Ensure parent directory exists
+   240→    const parentDir = path.dirname(safe);
+   241→    if (!fs.existsSync(parentDir)) fs.mkdirSync(parentDir, { recursive: true });
+   242→
+   243→    fs.writeFileSync(safe, content, "utf-8");
+   244→    await auditLog(req, "write", file);
+   245→
+   246→    res.json({ success: true, path: file, size: content.length });
+   247→  } catch (e: any) {
+   248→    res.status(500).json({ error: "خطأ في حفظ الملف: " + e.message });
+   249→  }
+   250→});
+   251→
+   252→// ---------------------------------------------------------------------------
+   253→//  POST /api/admin/files/create — create new file or directory
+   254→// ---------------------------------------------------------------------------
+   255→router.post("/create", adminRequired, async (req: AuthedRequest, res) => {
+   256→  const { path: filePath, type, content } = req.body;
+   257→  if (!filePath || !type) return res.status(400).json({ error: "يجب تحديد المسار والنوع" });
+   258→  if (!["file", "directory"].includes(type)) return res.status(400).json({ error: "النوع يجب أن يكون file أو directory" });
+   259→
+   260→  const safe = safePath(filePath);
+   261→  if (!safe) return res.status(400).json({ error: "مسار غير صالح" });
+   262→  if (isDenied(safe)) return res.status(403).json({ error: "الوصول لهذا المسار ممنوع" });
+   263→
+   264→  try {
+   265→    if (fs.existsSync(safe)) return res.status(409).json({ error: "المسار موجود بالفعل" });
+   266→
+   267→    if (type === "directory") {
+   268→      fs.mkdirSync(safe, { recursive: true });
+   269→    } else {
+   270→      const parentDir = path.dirname(safe);
+   271→      if (!fs.existsSync(parentDir)) fs.mkdirSync(parentDir, { recursive: true });
+   272→      fs.writeFileSync(safe, content || "", "utf-8");
+   273→    }
+   274→
+   275→    await auditLog(req, `create:${type}`, filePath);
+   276→    res.json({ success: true, path: filePath, type });
+   277→  } catch (e: any) {
+   278→    res.status(500).json({ error: "خطأ في الإنشاء: " + e.message });
+   279→  }
+   280→});
+   281→
+   282→// ---------------------------------------------------------------------------
+   283→//  DELETE /api/admin/files/delete — delete file or directory
+   284→// ---------------------------------------------------------------------------
+   285→router.delete("/delete", adminRequired, async (req: AuthedRequest, res) => {
+   286→  const { path: filePath, recursive } = req.body;
+   287→  if (!filePath) return res.status(400).json({ error: "يجب تحديد المسار" });
+   288→
+   289→  const safe = safePath(filePath);
+   290→  if (!safe) return res.status(400).json({ error: "مسار غير صالح" });
+   291→  if (isDenied(safe)) return res.status(403).json({ error: "حذف هذا المسار ممنوع" });
+   292→
+   293→  try {
+   294→    if (!fs.existsSync(safe)) return res.status(404).json({ error: "المسار غير موجود" });
+   295→
+   296→    const stat = fs.statSync(safe);
+   297→    // Backup before delete
+   298→    const backupDir = path.resolve(PROJECT_ROOT, ".backups");
+   299→    if (!fs.existsSync(backupDir)) fs.mkdirSync(backupDir, { recursive: true });
+   300→    const ts = Date.now();
+   301→    if (stat.isDirectory()) {
+   302→      const entries = fs.readdirSync(safe);
+   303→      if (entries.length > 0 && !recursive) return res.status(400).json({ error: "لا يمكن حذف مجلد غير فارغ. استخدم الحذف المتكرر." });
+   304→      // For recursive delete, backup as zip
+   305→      fs.rmSync(safe, { recursive: true, force: true });
+   306→    } else {
+   307→      const backupName = `${path.basename(safe)}.${ts}.del.bak`;
+   308→      fs.copyFileSync(safe, path.join(backupDir, backupName));
+   309→      fs.unlinkSync(safe);
+   310→    }
+   311→
+   312→    await auditLog(req, `delete:${stat.isDirectory() ? "dir" : "file"}`, filePath);
+   313→    res.json({ success: true, path: filePath });
+   314→  } catch (e: any) {
+   315→    res.status(500).json({ error: "خطأ في الحذف: " + e.message });
+   316→  }
+   317→});
+   318→
+   319→// ---------------------------------------------------------------------------
+   320→//  POST /api/admin/files/rename — rename / move file or directory
+   321→// ---------------------------------------------------------------------------
+   322→router.post("/rename", adminRequired, async (req: AuthedRequest, res) => {
+   323→  const { oldPath, newPath } = req.body;
+   324→  if (!oldPath || !newPath) return res.status(400).json({ error: "يجب تحديد المسار القديم والجديد" });
+   325→
+   326→  const safeOld = safePath(oldPath);
+   327→  const safeNew = safePath(newPath);
+   328→  if (!safeOld || !safeNew) return res.status(400).json({ error: "مسار غير صالح" });
+   329→  if (isDenied(safeOld) || isDenied(safeNew)) return res.status(403).json({ error: "الوصول لهذا المسار ممنوع" });
+   330→
+   331→  try {
+   332→    if (!fs.existsSync(safeOld)) return res.status(404).json({ error: "المسار القديم غير موجود" });
+   333→    if (fs.existsSync(safeNew)) return res.status(409).json({ error: "المسار الجديد موجود بالفعل" });
+   334→
+   335→    // Ensure parent dir exists for new path
+   336→    const parentDir = path.dirname(safeNew);
+   337→    if (!fs.existsSync(parentDir)) fs.mkdirSync(parentDir, { recursive: true });
+   338→
+   339→    fs.renameSync(safeOld, safeNew);
+   340→    await auditLog(req, "rename", `${oldPath} -> ${newPath}`);
+   341→    res.json({ success: true, oldPath, newPath });
+   342→  } catch (e: any) {
+   343→    res.status(500).json({ error: "خطأ في إعادة التسمية: " + e.message });
+   344→  }
+   345→});
+   346→
+   347→// ---------------------------------------------------------------------------
+   348→//  POST /api/admin/files/upload — upload file(s)
+   349→// ---------------------------------------------------------------------------
+   350→router.post("/upload", adminRequired, async (req: AuthedRequest, res) => {
+   351→  const { files, targetDir } = req.body;
+   352→  if (!files || !Array.isArray(files) || !targetDir) {
+   353→    return res.status(400).json({ error: "يجب تحديد الملفات والمجلد الهدف" });
+   354→  }
+   355→
+   356→  const safeDir = safePath(targetDir);
+   357→  if (!safeDir) return res.status(400).json({ error: "مسار غير صالح" });
+   358→  if (isDenied(safeDir)) return res.status(403).json({ error: "الوصول لهذا المسار ممنوع" });
+   359→
+   360→  try {
+   361→    if (!fs.existsSync(safeDir)) fs.mkdirSync(safeDir, { recursive: true });
+   362→
+   363→    const results = [];
+   364→    for (const f of files) {
+   365→      if (!f.name || !f.content) continue;
+   366→      const safeFile = safePath(path.join(targetDir, f.name));
+   367→      if (!safeFile || isDenied(safeFile)) continue;
+   368→
+   369→      const buffer = Buffer.from(f.content, "base64");
+   370→      fs.writeFileSync(safeFile, buffer);
+   371→      results.push({ name: f.name, size: buffer.length });
+   372→      await auditLog(req, "upload", path.join(targetDir, f.name));
+   373→    }
+   374→
+   375→    res.json({ success: true, uploaded: results });
+   376→  } catch (e: any) {
+   377→    res.status(500).json({ error: "خطأ في رفع الملفات: " + e.message });
+   378→  }
+   379→});
+   380→
+   381→// ---------------------------------------------------------------------------
+   382→//  POST /api/admin/files/terminal — execute shell command (DANGEROUS)
+   383→// ---------------------------------------------------------------------------
+   384→router.post("/terminal", adminRequired, async (req: AuthedRequest, res) => {
+   385→  const { command } = req.body;
+   386→  if (!command || typeof command !== "string") return res.status(400).json({ error: "يجب تحديد الأمر" });
+   387→
+   388→  // Block extremely dangerous commands
+   389→  const blocked = [
+   390→    "rm -rf /", "mkfs", "dd if=", ":(){ :|:& };:", "shutdown", "reboot",
+   391→    "init 0", "halt", "rm -rf ~", "rm -rf *", "format", "del /f /s /q c:",
+   392→    "curl", "wget", "nc ", "ncat", "socat", "chmod 777 /",
+   393→  ];
+   394→  const cmdLower = command.toLowerCase().trim();
+   395→  if (blocked.some((b) => cmdLower.includes(b.toLowerCase()))) {
+   396→    await recordSecurityEvent({
+   397→      type: "dangerous_command_blocked",
+   398→      severity: "critical",
+   399→      ip: getClientIp(req),
+   400→      detail: `${req.user?.email} tried: ${command}`,
+   401→    });
+   402→    return res.status(403).json({ error: "هذا الأمر ممنوع لأسباب أمنية" });
+   403→  }
+   404→
+   405→  await auditLog(req, "terminal", command);
+   406→
+   407→  try {
+   408→    const projectDir = PROJECT_ROOT;
+   409→    const timeout = command.includes("npm") || command.includes("npx") ? 120000 : 30000;
+   410→
+   411→    exec(command, { cwd: projectDir, timeout, maxBuffer: 5 * 1024 * 1024 }, (error, stdout, stderr) => {
+   412→      res.json({
+   413→        success: !error,
+   414→        stdout: stdout || "",
+   415→        stderr: stderr || "",
+   416→        exitCode: error?.code || 0,
+   417→        command,
+   418→      });
+   419→    });
+   420→  } catch (e: any) {
+   421→    res.status(500).json({ error: "خطأ في تنفيذ الأمر: " + e.message });
+   422→  }
+   423→});
+   424→
+   425→// ---------------------------------------------------------------------------
+   426→//  GET /api/admin/files/search — search for files by name
+   427→// ---------------------------------------------------------------------------
+   428→router.get("/search", adminRequired, async (req: AuthedRequest, res) => {
+   429→  const query = req.query.q as string;
+   430→  if (!query) return res.status(400).json({ error: "يجب تحديد كلمة البحث" });
+   431→  if (query.length < 2) return res.status(400).json({ error: "كلمة البحث قصيرة جداً" });
+   432→
+   433→  try {
+   434→    exec(
+   435→      `find . -type f -name "*${query.replace(/[^a-zA-Z0-9._\-]/g, "")}*" -not -path "*/node_modules/*" -not -path "*/.git/*" -not -path "*/.backups/*" -not -path "*/dist/*" | head -50`,
+   436→      { cwd: PROJECT_ROOT, timeout: 10000 },
+   437→      (error, stdout) => {
+   438→        const files = stdout
+   439→          .split("\n")
+   440→          .filter(Boolean)
+   441→          .map((f) => f.replace(/^\.\//, ""))
+   442→          .slice(0, 50);
+   443→        res.json({ files, query });
+   444→      }
+   445→    );
+   446→  } catch (e: any) {
+   447→    res.status(500).json({ error: "خطأ في البحث" });
+   448→  }
+   449→});
+   450→
+   451→// ---------------------------------------------------------------------------
+   452→//  POST /api/admin/files/find-replace — find & replace across files
+   453→// ---------------------------------------------------------------------------
+   454→router.post("/find-replace", adminRequired, async (req: AuthedRequest, res) => {
+   455→  const { find, replace, filePattern, dirPath } = req.body;
+   456→  if (!find) return res.status(400).json({ error: "يجب تحديد نص البحث" });
+   457→
+   458→  const searchDir = dirPath ? safePath(dirPath) : PROJECT_ROOT;
+   459→  if (!searchDir) return res.status(400).json({ error: "مسار غير صالح" });
+   460→
+   461→  await auditLog(req, "find-replace", `find="${find}" replace="${replace || ""}" in=${dirPath || "/"}`);
+   462→
+   463→  try {
+   464→    const pattern = filePattern || "*.{ts,tsx,js,jsx,css,html,json,md}";
+   465→    // Use grep to find matching files first (dry run)
+   466→    const grepCmd = `grep -rl --include=${pattern} "${find.replace(/"/g, '\\"')}" . 2>/dev/null | head -30`;
+   467→    const { stdout } = await execAsync(grepCmd, { cwd: searchDir, timeout: 15000 });
+   468→    const matchingFiles = stdout.split("\n").filter(Boolean).map(f => f.replace(/^\.\//, ""));
+   469→
+   470→    if (!replace) {
+   471→      // Dry run — just return matching files and line count
+   472→      return res.json({ files: matchingFiles, count: matchingFiles.length, dryRun: true });
+   473→    }
+   474→
+   475→    // Actual replace
+   476→    const results: { file: string; replacements: number }[] = [];
+   477→    for (const relFile of matchingFiles) {
+   478→      const absPath = safePath(relFile);
+   479→      if (!absPath || isDenied(absPath)) continue;
+   480→      try {
+   481→        const content = fs.readFileSync(absPath, "utf-8");
+   482→        const escapedFind = find.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+   483→        const matches = content.match(new RegExp(escapedFind, "g"));
+   484→        if (matches && matches.length > 0) {
+   485→          // Backup
+   486→          const backupDir = path.resolve(PROJECT_ROOT, ".backups");
+   487→          if (!fs.existsSync(backupDir)) fs.mkdirSync(backupDir, { recursive: true });
+   488→          fs.copyFileSync(absPath, path.join(backupDir, `${path.basename(absPath)}.${Date.now()}.fr.bak`));
+   489→
+   490→          const newContent = content.replace(new RegExp(escapedFind, "g"), replace);
+   491→          fs.writeFileSync(absPath, newContent, "utf-8");
+   492→          results.push({ file: relFile, replacements: matches.length });
+   493→        }
+   494→      } catch {}
+   495→    }
+   496→
+   497→    res.json({ files: results, count: results.reduce((s, r) => s + r.replacements, 0), dryRun: false });
+   498→  } catch (e: any) {
+   499→    res.status(500).json({ error: "خطأ في البحث والاستبدال: " + e.message });
+   500→  }
+   501→});
+   502→
+   503→// ---------------------------------------------------------------------------
+   504→//  GET /api/admin/files/backups — list backups
+   505→// ---------------------------------------------------------------------------
+   506→router.get("/backups", adminRequired, async (req: AuthedRequest, res) => {
+   507→  try {
+   508→    const backupDir = path.resolve(PROJECT_ROOT, ".backups");
+   509→    if (!fs.existsSync(backupDir)) return res.json({ backups: [] });
+   510→
+   511→    const entries = fs.readdirSync(backupDir).sort().reverse().slice(0, 100);
+   512→    const backups = entries.map((name) => {
+   513→      const stat = fs.statSync(path.join(backupDir, name));
+   514→      return { name, size: stat.size, modified: stat.mtime.toISOString() };
+   515→    });
+   516→
+   517→    res.json({ backups });
+   518→  } catch (e: any) {
+   519→    res.status(500).json({ error: "خطأ في قراءة النسخ الاحتياطية" });
+   520→  }
+   521→});
+   522→
+   523→// ---------------------------------------------------------------------------
+   524→//  POST /api/admin/files/backups/restore — restore from backup
+   525→// ---------------------------------------------------------------------------
+   526→router.post("/backups/restore", adminRequired, async (req: AuthedRequest, res) => {
+   527→  const { backupName, targetPath } = req.body;
+   528→  if (!backupName) return res.status(400).json({ error: "يجب تحديد اسم النسخة الاحتياطية" });
+   529→
+   530→  const backupDir = path.resolve(PROJECT_ROOT, ".backups");
+   531→  const backupFile = path.join(backupDir, path.basename(backupName));
+   532→
+   533→  // Ensure backup exists and is inside backup dir
+   534→  if (!backupFile.startsWith(backupDir + path.sep)) return res.status(400).json({ error: "مسار غير صالح" });
+   535→  if (!fs.existsSync(backupFile)) return res.status(404).json({ error: "النسخة الاحتياطية غير موجودة" });
+   536→
+   537→  try {
+   538→    let restoreTo = targetPath;
+   539→    if (!restoreTo) {
+   540→      // Guess original file name from backup name (file.ts.1234567890.bak -> file.ts)
+   541→      restoreTo = backupName.replace(/\.\d+\.(bak|del\.bak|fr\.bak)$/, "");
+   542→    }
+   543→
+   544→    const safeTarget = safePath(restoreTo);
+   545→    if (!safeTarget) return res.status(400).json({ error: "مسار الهدف غير صالح" });
+   546→
+   547→    fs.copyFileSync(backupFile, safeTarget);
+   548→    await auditLog(req, "restore", `${backupName} -> ${restoreTo}`);
+   549→    res.json({ success: true, restoredTo: restoreTo });
+   550→  } catch (e: any) {
+   551→    res.status(500).json({ error: "خطأ في الاستعادة: " + e.message });
+   552→  }
+   553→});
+   554→
+   555→// ---------------------------------------------------------------------------
+   556→//  GET /api/admin/files/stats — project file stats
+   557→// ---------------------------------------------------------------------------
+   558→router.get("/stats", adminRequired, async (req: AuthedRequest, res) => {
+   559→  try {
+   560→    exec(
+   561→      `echo "FILES=$(find . -type f -not -path '*/node_modules/*' -not -path '*/.git/*' -not -path '*/dist/*' -not -path '*/.backups/*' | wc -l)" && echo "DIRS=$(find . -type d -not -path '*/node_modules/*' -not -path '*/.git/*' -not -path '*/dist/*' -not -path '*/.backups/*' | wc -l)" && echo "SIZE=$(du -sh --exclude=node_modules --exclude=.git --exclude=dist --exclude=.backups . 2>/dev/null | cut -f1)"`,
+   562→      { cwd: PROJECT_ROOT, timeout: 10000 },
+   563→      (error, stdout) => {
+   564→        const lines = stdout.split("\n");
+   565→        const stats: Record<string, string> = {};
+   566→        lines.forEach((l) => {
+   567→          const [k, v] = l.split("=");
+   568→          if (k && v) stats[k.trim()] = v.trim();
+   569→        });
+   570→        res.json({ stats, projectRoot: relPath(PROJECT_ROOT) });
+   571→      }
+   572→    );
+   573→  } catch (e: any) {
+   574→    res.status(500).json({ error: "خطأ في جلب الإحصائيات" });
+   575→  }
+   576→});
+   577→
+   578→// ===========================================================================
+   579→//  NPM PACKAGE MANAGEMENT
+   580→// ===========================================================================
+   581→
+   582→// GET /api/admin/files/npm/list — list installed packages
+   583→router.get("/npm/list", adminRequired, async (req: AuthedRequest, res) => {
+   584→  try {
+   585→    const pkgPath = path.resolve(PROJECT_ROOT, "package.json");
+   586→    if (!fs.existsSync(pkgPath)) return res.json({ dependencies: {}, devDependencies: {} });
+   587→
+   588→    const pkg = JSON.parse(fs.readFileSync(pkgPath, "utf-8"));
+   589→    await auditLog(req, "npm-list", "read package.json");
+   590→    res.json({
+   591→      dependencies: pkg.dependencies || {},
+   592→      devDependencies: pkg.devDependencies || {},
+   593→      scripts: pkg.scripts || {},
+   594→      name: pkg.name,
+   595→      version: pkg.version,
+   596→    });
+   597→  } catch (e: any) {
+   598→    res.status(500).json({ error: "خطأ في قراءة package.json" });
+   599→  }
+   600→});
+   601→
+   602→// POST /api/admin/files/npm/install — install npm package(s)
+   603→router.post("/npm/install", adminRequired, async (req: AuthedRequest, res) => {
+   604→  const { packages, dev, workdir } = req.body;
+   605→  if (!packages || !Array.isArray(packages) || packages.length === 0) {
+   606→    return res.status(400).json({ error: "يجب تحديد الحزم" });
+   607→  }
+   608→
+   609→  // Validate package names (no shell injection)
+   610→  const validName = /^[@a-zA-Z0-9._-]+$/;
+   611→  const safePackages = packages.filter((p: string) => validName.test(p));
+   612→  if (safePackages.length === 0) return res.status(400).json({ error: "أسماء حزم غير صالحة" });
+   613→
+   614→  const installDir = workdir === "server" ? path.resolve(PROJECT_ROOT, "server") : PROJECT_ROOT;
+   615→  const cmd = `npm install ${dev ? "--save-dev" : "--save"} ${safePackages.join(" ")}`;
+   616→
+   617→  await auditLog(req, "npm-install", cmd);
+   618→
+   619→  try {
+   620→    exec(cmd, { cwd: installDir, timeout: 180000, maxBuffer: 5 * 1024 * 1024 }, (error, stdout, stderr) => {
+   621→      res.json({
+   622→        success: !error,
+   623→        stdout: stdout || "",
+   624→        stderr: stderr || "",
+   625→        exitCode: error?.code || 0,
+   626→        command: cmd,
+   627→      });
+   628→    });
+   629→  } catch (e: any) {
+   630→    res.status(500).json({ error: "خطأ في تثبيت الحزم: " + e.message });
+   631→  }
+   632→});
+   633→
+   634→// POST /api/admin/files/npm/uninstall — uninstall npm package(s)
+   635→router.post("/npm/uninstall", adminRequired, async (req: AuthedRequest, res) => {
+   636→  const { packages, dev, workdir } = req.body;
+   637→  if (!packages || !Array.isArray(packages) || packages.length === 0) {
+   638→    return res.status(400).json({ error: "يجب تحديد الحزم" });
+   639→  }
+   640→
+   641→  const validName = /^[@a-zA-Z0-9._-]+$/;
+   642→  const safePackages = packages.filter((p: string) => validName.test(p));
+   643→  if (safePackages.length === 0) return res.status(400).json({ error: "أسماء حزم غير صالحة" });
+   644→
+   645→  const installDir = workdir === "server" ? path.resolve(PROJECT_ROOT, "server") : PROJECT_ROOT;
+   646→  const cmd = `npm uninstall ${dev ? "--save-dev" : "--save"} ${safePackages.join(" ")}`;
+   647→
+   648→  await auditLog(req, "npm-uninstall", cmd);
+   649→
+   650→  try {
+   651→    exec(cmd, { cwd: installDir, timeout: 120000, maxBuffer: 5 * 1024 * 1024 }, (error, stdout, stderr) => {
+   652→      res.json({
+   653→        success: !error,
+   654→        stdout: stdout || "",
+   655→        stderr: stderr || "",
+   656→        exitCode: error?.code || 0,
+   657→        command: cmd,
+   658→      });
+   659→    });
+   660→  } catch (e: any) {
+   661→    res.status(500).json({ error: "خطأ في إزالة الحزم: " + e.message });
+   662→  }
+   663→});
+   664→
+   665→// POST /api/admin/files/npm/run-script — run npm script
+   666→router.post("/npm/run-script", adminRequired, async (req: AuthedRequest, res) => {
+   667→  const { script, workdir } = req.body;
+   668→  if (!script || typeof script !== "string") return res.status(400).json({ error: "يجب تحديد اسم السكريبت" });
+   669→
+   670→  const validScript = /^[a-zA-Z0-9:_-]+$/;
+   671→  if (!validScript.test(script)) return res.status(400).json({ error: "اسم السكريبت غير صالح" });
+   672→
+   673→  const runDir = workdir === "server" ? path.resolve(PROJECT_ROOT, "server") : PROJECT_ROOT;
+   674→  const cmd = `npm run ${script}`;
+   675→
+   676→  await auditLog(req, "npm-run", cmd);
+   677→
+   678→  try {
+   679→    exec(cmd, { cwd: runDir, timeout: 180000, maxBuffer: 5 * 1024 * 1024 }, (error, stdout, stderr) => {
+   680→      res.json({
+   681→        success: !error,
+   682→        stdout: stdout || "",
+   683→        stderr: stderr || "",
+   684→        exitCode: error?.code || 0,
+   685→        command: cmd,
+   686→      });
+   687→    });
+   688→  } catch (e: any) {
+   689→    res.status(500).json({ error: "خطأ في تشغيل السكريبت: " + e.message });
+   690→  }
+   691→});
+   692→
+   693→// GET /api/admin/files/npm/search — search npm registry
+   694→router.get("/npm/search", adminRequired, async (req: AuthedRequest, res) => {
+   695→  const q = req.query.q as string;
+   696→  if (!q || q.length < 2) return res.status(400).json({ error: "كلمة البحث قصيرة" });
+   697→
+   698→  try {
+   699→    exec(`npm search ${q.replace(/[^a-zA-Z0-9@._-]/g, "")} --json 2>/dev/null | head -100`, 
+   700→      { cwd: PROJECT_ROOT, timeout: 30000, maxBuffer: 2 * 1024 * 1024 }, 
+   701→      (error, stdout) => {
+   702→        try {
+   703→          const results = JSON.parse(stdout || "[]");
+   704→          res.json({ results: Array.isArray(results) ? results.slice(0, 20) : [] });
+   705→        } catch {
+   706→          res.json({ results: [] });
+   707→        }
+   708→      }
+   709→    );
+   710→  } catch (e: any) {
+   711→    res.status(500).json({ error: "خطأ في البحث" });
+   712→  }
+   713→});
+   714→
+   715→// ===========================================================================
+   716→//  GIT INTEGRATION
+   717→// ===========================================================================
+   718→
+   719→// GET /api/admin/files/git/status — git status
+   720→router.get("/git/status", adminRequired, async (req: AuthedRequest, res) => {
+   721→  try {
+   722→    exec("git status --porcelain && echo '---' && git branch --show-current && echo '---' && git log --oneline -5", 
+   723→      { cwd: PROJECT_ROOT, timeout: 10000 }, (error, stdout) => {
+   724→        const parts = stdout.split("---");
+   725→        const changed = (parts[0] || "").split("\n").filter(Boolean).map((line) => ({
+   726→          status: line.substring(0, 2).trim(),
+   727→          file: line.substring(3),
+   728→        }));
+   729→        const branch = (parts[1] || "").trim();
+   730→        const recentCommits = (parts[2] || "").split("\n").filter(Boolean);
+   731→        res.json({ changed, branch, recentCommits, hasGit: !error });
+   732→      }
+   733→    );
+   734→  } catch (e: any) {
+   735→    res.json({ changed: [], branch: "", recentCommits: [], hasGit: false, error: e.message });
+   736→  }
+   737→});
+   738→
+   739→// POST /api/admin/files/git/commit — git add & commit
+   740→router.post("/git/commit", adminRequired, async (req: AuthedRequest, res) => {
+   741→  const { message, addAll } = req.body;
+   742→  if (!message || typeof message !== "string") return res.status(400).json({ error: "يجب تحديد رسالة الكوميت" });
+   743→
+   744→  // Sanitize message
+   745→  const safeMsg = message.replace(/[`$\\"]/g, "");
+   746→  await auditLog(req, "git-commit", safeMsg);
+   747→
+   748→  try {
+   749→    const addCmd = addAll !== false ? "git add -A && " : "";
+   750→    exec(`${addCmd}git commit -m "${safeMsg}"`, 
+   751→      { cwd: PROJECT_ROOT, timeout: 30000 }, (error, stdout, stderr) => {
+   752→        res.json({
+   753→          success: !error,
+   754→          stdout: stdout || "",
+   755→          stderr: stderr || "",
+   756→          exitCode: error?.code || 0,
+   757→        });
+   758→      }
+   759→    );
+   760→  } catch (e: any) {
+   761→    res.status(500).json({ error: "خطأ في الكوميت: " + e.message });
+   762→  }
+   763→});
+   764→
+   765→// POST /api/admin/files/git/push — git push
+   766→router.post("/git/push", adminRequired, async (req: AuthedRequest, res) => {
+   767→  const { remote, branch } = req.body;
+   768→  const safeRemote = (remote || "origin").replace(/[^a-zA-Z0-9._\-]/g, "");
+   769→  const safeBranch = (branch || "main").replace(/[^a-zA-Z0-9._\/\-]/g, "");
+   770→
+   771→  await auditLog(req, "git-push", `${safeRemote} ${safeBranch}`);
+   772→
+   773→  try {
+   774→    exec(`git push ${safeRemote} ${safeBranch}`, 
+   775→      { cwd: PROJECT_ROOT, timeout: 60000 }, (error, stdout, stderr) => {
+   776→        res.json({
+   777→          success: !error,
+   778→          stdout: stdout || "",
+   779→          stderr: stderr || "",
+   780→          exitCode: error?.code || 0,
+   781→        });
+   782→      }
+   783→    );
+   784→  } catch (e: any) {
+   785→    res.status(500).json({ error: "خطأ في الدفع: " + e.message });
+   786→  }
+   787→});
+   788→
+   789→// POST /api/admin/files/git/pull — git pull
+   790→router.post("/git/pull", adminRequired, async (req: AuthedRequest, res) => {
+   791→  await auditLog(req, "git-pull", "");
+   792→
+   793→  try {
+   794→    exec("git pull", { cwd: PROJECT_ROOT, timeout: 60000 }, (error, stdout, stderr) => {
+   795→      res.json({
+   796→        success: !error,
+   797→        stdout: stdout || "",
+   798→        stderr: stderr || "",
+   799→        exitCode: error?.code || 0,
+   800→      });
+   801→    });
+   802→  } catch (e: any) {
+   803→    res.status(500).json({ error: "خطأ في السحب: " + e.message });
+   804→  }
+   805→});
+   806→
+   807→// GET /api/admin/files/git/log — git log
+   808→router.get("/git/log", adminRequired, async (req: AuthedRequest, res) => {
+   809→  const count = Number(req.query.count) || 20;
+   810→  try {
+   811→    exec(`git log --oneline -${Math.min(count, 50)}`, 
+   812→      { cwd: PROJECT_ROOT, timeout: 10000 }, (error, stdout) => {
+   813→        const commits = stdout.split("\n").filter(Boolean);
+   814→        res.json({ commits, hasGit: !error });
+   815→      }
+   816→    );
+   817→  } catch (e: any) {
+   818→    res.json({ commits: [], hasGit: false });
+   819→  }
+   820→});
+   821→
+   822→// ===========================================================================
+   823→//  DEPLOY & BUILD
+   824→// ===========================================================================
+   825→
+   826→// POST /api/admin/files/build — build the project
+   827→router.post("/build", adminRequired, async (req: AuthedRequest, res) => {
+   828→  await auditLog(req, "build", "vite build");
+   829→
+   830→  try {
+   831→    exec("npm run build", { cwd: PROJECT_ROOT, timeout: 300000, maxBuffer: 10 * 1024 * 1024 }, (error, stdout, stderr) => {
+   832→      res.json({
+   833→        success: !error,
+   834→        stdout: stdout || "",
+   835→        stderr: stderr || "",
+   836→        exitCode: error?.code || 0,
+   837→      });
+   838→    });
+   839→  } catch (e: any) {
+   840→    res.status(500).json({ error: "خطأ في البناء: " + e.message });
+   841→  }
+   842→});
+   843→
+   844→// POST /api/admin/files/deploy — deploy to server via SSH/SCP
+   845→router.post("/deploy", adminRequired, async (req: AuthedRequest, res) => {
+   846→  const { host, user, path: deployPath, key, method } = req.body;
+   847→  if (!host || !user || !deployPath) {
+   848→    return res.status(400).json({ error: "يجب تحديد بيانات السيرفر (المضيف، المستخدم، المسار)" });
+   849→  }
+   850→
+   851→  // Sanitize inputs
+   852→  const safeHost = host.replace(/[^a-zA-Z0-9._\-]/g, "");
+   853→  const safeUser = user.replace(/[^a-zA-Z0-9._\-]/g, "");
+   854→  const safePath = deployPath.replace(/[`$\\;|&]/g, "");
+   855→  const safeKey = key ? key.replace(/[^a-zA-Z0-9._\-\/\n ]/g, "") : "";
+   856→
+   857→  await auditLog(req, "deploy", `${safeUser}@${safeHost}:${safePath}`);
+   858→
+   859→  try {
+   860→    // First build the project
+   861→    const buildResult = await new Promise<{ success: boolean; stdout: string; stderr: string }>((resolve) => {
+   862→      exec("npm run build", { cwd: PROJECT_ROOT, timeout: 300000, maxBuffer: 10 * 1024 * 1024 }, (error, stdout, stderr) => {
+   863→        resolve({ success: !error, stdout: stdout || "", stderr: stderr || "" });
+   864→      });
+   865→    });
+   866→
+   867→    if (!buildResult.success) {
+   868→      return res.json({ success: false, step: "build", stdout: buildResult.stdout, stderr: buildResult.stderr, error: "فشل البناء" });
+   869→    }
+   870→
+   871→    // Deploy via rsync or scp
+   872→    const sshKeyArg = safeKey ? `-i ${safeKey}` : "";
+   873→    const deployCmd = method === "rsync" 
+   874→      ? `rsync -avz --delete ${sshKeyArg} dist/public/ ${safeUser}@${safeHost}:${safePath}`
+   875→      : `scp -r ${sshKeyArg} dist/public/* ${safeUser}@${safeHost}:${safePath}`;
+   876→
+   877→    exec(deployCmd, { cwd: PROJECT_ROOT, timeout: 300000, maxBuffer: 5 * 1024 * 1024 }, (error, stdout, stderr) => {
+   878→      res.json({
+   879→        success: !error,
+   880→        step: "deploy",
+   881→        buildOutput: buildResult.stdout,
+   882→        stdout: stdout || "",
+   883→        stderr: stderr || "",
+   884→        exitCode: error?.code || 0,
+   885→      });
+   886→    });
+   887→  } catch (e: any) {
+   888→    res.status(500).json({ error: "خطأ في النشر: " + e.message });
+   889→  }
+   890→});
+   891→
+   892→// POST /api/admin/files/restart-server — restart the backend server
+   893→router.post("/restart-server", adminRequired, async (req: AuthedRequest, res) => {
+   894→  await auditLog(req, "restart-server", "");
+   895→
+   896→  try {
+   897→    // Kill existing server process and restart
+   898→    exec("pkill -f 'node.*server/dist/index.js' 2>/dev/null; sleep 1; cd server && npm run build && node dist/index.js &", 
+   899→      { cwd: PROJECT_ROOT, timeout: 10000 }, (error, stdout, stderr) => {
+   900→        res.json({
+   901→          success: true,
+   902→          message: "تم إعادة تشغيل السيرفر",
+   903→          stdout: stdout || "",
+   904→          stderr: stderr || "",
+   905→        });
+   906→      }
+   907→    );
+   908→  } catch (e: any) {
+   909→    res.status(500).json({ error: "خطأ في إعادة التشغيل: " + e.message });
+   910→  }
+   911→});
+   912→
+   913→// ===========================================================================
+   914→//  DOWNLOAD PROJECT AS ZIP
+   915→// ===========================================================================
+   916→
+   917→router.get("/download", adminRequired, async (req: AuthedRequest, res) => {
+   918→  await auditLog(req, "download", "project zip");
+   919→
+   920→  try {
+   921→    const tmpZip = path.resolve(PROJECT_ROOT, ".backups", `zero-project-${Date.now()}.zip`);
+   922→    const backupDir = path.resolve(PROJECT_ROOT, ".backups");
+   923→    if (!fs.existsSync(backupDir)) fs.mkdirSync(backupDir, { recursive: true });
+   924→
+   925→    exec(
+   926→      `zip -r ${tmpZip} . -x "node_modules/*" ".git/*" "dist/*" ".backups/*" "dev.db" ".env" 2>/dev/null`,
+   927→      { cwd: PROJECT_ROOT, timeout: 60000 },
+   928→      (error) => {
+   929→        if (error || !fs.existsSync(tmpZip)) {
+   930→          return res.status(500).json({ error: "خطأ في ضغط المشروع" });
+   931→        }
+   932→        const stat = fs.statSync(tmpZip);
+   933→        res.setHeader("Content-Type", "application/zip");
+   934→        res.setHeader("Content-Length", stat.size);
+   935→        res.setHeader("Content-Disposition", `attachment; filename=zero-project-${Date.now()}.zip`);
+   936→        const stream = fs.createReadStream(tmpZip);
+   937→        stream.pipe(res);
+   938→        stream.on("end", () => {
+   939→          try { fs.unlinkSync(tmpZip); } catch {}
+   940→        });
+   941→      }
+   942→    );
+   943→  } catch (e: any) {
+   944→    res.status(500).json({ error: "خطأ في التنزيل: " + e.message });
+   945→  }
+   946→});
+   947→
+   948→export default router;
+   949→

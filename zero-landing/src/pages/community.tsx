@@ -3,13 +3,13 @@ import { Users, MessageCircle, Zap, TrendingUp, Award, Star, ExternalLink } from
 import { Navbar } from "@/components/layout/Navbar";
 import { Footer } from "@/components/layout/Footer";
 import { Button } from "@/components/ui/button";
-import { useI18n } from "@/contexts/i18n-context";
+import { useI18n, useT } from "@/contexts/i18n-context";
 
 const stats = [
-  { label: "عضو في المجتمع", value: "2,400+", icon: Users },
-  { label: "رسالة يومياً", value: "500+", icon: MessageCircle },
-  { label: "مشروع أُنجز", value: "52+", icon: Zap },
-  { label: "معدل النشاط", value: "98%", icon: TrendingUp },
+  { labelKey: "community.membersCount", value: "2,400+", icon: Users },
+  { labelKey: "community.topicsCount", value: "500+", icon: MessageCircle },
+  { labelKey: "community.repliesCount", value: "52+", icon: Zap },
+  { labelKey: "community.onlineCount", value: "98%", icon: TrendingUp },
 ];
 
 const channels = [
@@ -35,6 +35,7 @@ const members = [
 
 export default function Community() {
   const { dir } = useI18n();
+  const t = useT();
   return (
     <div className="min-h-screen bg-background text-foreground" dir={dir}>
       <Navbar />
@@ -46,10 +47,10 @@ export default function Community() {
             <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}>
               <p className="font-mono text-xs text-primary mb-3">()COMMUNITY.NETWORK //</p>
               <h1 className="text-4xl md:text-5xl font-bold mb-4">
-                مجتمع <span className="text-primary">ZERO</span>
+                {t("community.title")} <span className="text-primary">ZERO</span>
               </h1>
               <p className="text-muted-foreground text-lg mb-8">
-                انضم لمجتمع المطورين العرب الأكثر تفاعلاً — تعلم، شارك، وانمو
+                {t("community.subtitle")}
               </p>
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                 {stats.map((s, i) => (
@@ -62,7 +63,7 @@ export default function Community() {
                   >
                     <s.icon size={18} className="text-primary mx-auto mb-2" />
                     <div className="text-xl font-bold text-primary font-mono">{s.value}</div>
-                    <div className="text-xs text-muted-foreground mt-1">{s.label}</div>
+                    <div className="text-xs text-muted-foreground mt-1">{t(s.labelKey as any)}</div>
                   </motion.div>
                 ))}
               </div>
@@ -73,7 +74,7 @@ export default function Community() {
         {/* Channels */}
         <section className="py-8 px-4">
           <div className="container mx-auto max-w-4xl">
-            <h2 className="text-xl font-bold mb-6 font-mono"><span className="text-primary">// </span>انضم الآن</h2>
+            <h2 className="text-xl font-bold mb-6 font-mono"><span className="text-primary">// </span>{t("community.joinNow")}</h2>
             <div className="grid md:grid-cols-2 gap-5 mb-10">
               {channels.map((c, i) => (
                 <motion.a
@@ -96,7 +97,7 @@ export default function Community() {
                       <p className="text-sm text-muted-foreground mb-3">{c.desc}</p>
                       <div className="flex items-center gap-2">
                         <Users size={12} className="text-primary" />
-                        <span className="text-xs font-mono text-muted-foreground">{c.members} عضو</span>
+                        <span className="text-xs font-mono text-muted-foreground">{c.members} {t("community.member")}</span>
                       </div>
                     </div>
                   </div>
@@ -105,9 +106,9 @@ export default function Community() {
             </div>
 
             {/* Active topics */}
-            <h2 className="text-xl font-bold mb-4 font-mono"><span className="text-primary">// </span>أحدث النقاشات</h2>
+            <h2 className="text-xl font-bold mb-4 font-mono"><span className="text-primary">// </span>{t("community.topicsTitle")}</h2>
             <div className="space-y-2 mb-10">
-              {topics.map((t, i) => (
+              {topics.map((topic, i) => (
                 <motion.div
                   key={i}
                   initial={{ opacity: 0, x: -10 }}
@@ -116,19 +117,19 @@ export default function Community() {
                   className="bg-card border border-border rounded-xl px-4 py-3 flex items-center justify-between hover:border-primary/30 transition-all cursor-pointer group"
                 >
                   <div className="flex items-center gap-3">
-                    {t.hot && <span className="text-xs bg-red-400/10 text-red-400 border border-red-400/20 px-1.5 py-0.5 rounded font-mono">🔥 رائج</span>}
-                    <span className="text-sm text-foreground group-hover:text-primary transition-colors">{t.title}</span>
+                    {topic.hot && <span className="text-xs bg-red-400/10 text-red-400 border border-red-400/20 px-1.5 py-0.5 rounded font-mono">🔥 {t("community.trending")}</span>}
+                    <span className="text-sm text-foreground group-hover:text-primary transition-colors">{topic.title}</span>
                   </div>
                   <div className="flex items-center gap-4 text-xs text-muted-foreground font-mono">
-                    <span>{t.replies} رد</span>
-                    <span>{t.views.toLocaleString()} مشاهدة</span>
+                    <span>{topic.replies} {t("community.replies")}</span>
+                    <span>{topic.views.toLocaleString()} {t("community.views")}</span>
                   </div>
                 </motion.div>
               ))}
             </div>
 
             {/* Top members */}
-            <h2 className="text-xl font-bold mb-4 font-mono"><span className="text-primary">// </span>أبرز الأعضاء</h2>
+            <h2 className="text-xl font-bold mb-4 font-mono"><span className="text-primary">// </span>{t("community.membersTitle")}</h2>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
               {members.map((m, i) => (
                 <motion.div
@@ -157,14 +158,14 @@ export default function Community() {
               <div className="absolute inset-0 cyber-grid opacity-5" />
               <div className="relative z-10">
                 <Star size={32} className="text-primary mx-auto mb-3" />
-                <h3 className="text-2xl font-bold mb-2">ابدأ رحلتك معنا</h3>
-                <p className="text-muted-foreground text-sm mb-5">المجتمع بانتظارك — انضم مجاناً الآن</p>
+                <h3 className="text-2xl font-bold mb-2">{t("community.ctaTitle")}</h3>
+                <p className="text-muted-foreground text-sm mb-5">{t("community.ctaDesc")}</p>
                 <div className="flex gap-3 justify-center">
                   <Button className="bg-primary text-primary-foreground hover:bg-primary/90 glow-cyan" asChild>
-                    <a href="https://chat.whatsapp.com/LkJJ5CIyE0mFdFIupB33J9" target="_blank">انضم للجروب</a>
+                    <a href="https://chat.whatsapp.com/LkJJ5CIyE0mFdFIupB33J9" target="_blank">{t("community.joinGroup")}</a>
                   </Button>
                   <Button variant="outline" className="border-primary/50 text-primary" asChild>
-                    <a href="https://whatsapp.com/channel/0029Vaxa4398V0tmGkGYkp2y" target="_blank">اشترك في القناة</a>
+                    <a href="https://whatsapp.com/channel/0029Vaxa4398V0tmGkGYkp2y" target="_blank">{t("community.joinChannel")}</a>
                   </Button>
                 </div>
               </div>
