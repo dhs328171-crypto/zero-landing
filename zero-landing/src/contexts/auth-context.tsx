@@ -176,8 +176,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         isAdmin: user?.role === "admin",
         adminVerified,
         loading,
-        login: loginAsync,
-        register: registerAsync,
+        login,
+        register,
         logout,
         updateProfile,
       }}

@@ -27,56 +27,10 @@ function publicUser(u: any) {
 }
 
 // ---------------------------------------------------------------------------
-//  POST /api/auth/register
+//  POST /api/auth/register  — DISABLED: registration is closed
 // ---------------------------------------------------------------------------
-router.post("/register", async (req, res) => {
-  const ip = getClientIp(req);
-  const userAgent = (req.headers["user-agent"] as string) || null;
-  try {
-    const { name, email, password } = req.body || {};
-    if (!name?.trim() || !email?.trim() || !password?.trim()) {
-      return res.status(400).json({ error: "جميع الحقول مطلوبة" });
-    }
-    if (password.length < 6) {
-      return res.status(400).json({ error: "كلمة المرور يجب أن تكون 6 أحرف على الأقل" });
-    }
-    if (password.length > 200) {
-      return res.status(400).json({ error: "كلمة المرور طويلة جداً" });
-    }
-
-    const normalizedEmail = email.toLowerCase().trim();
-    const existing = await prisma.user.findUnique({ where: { email: normalizedEmail } });
-    if (existing) {
-      return res.status(409).json({ error: "هذا البريد الإلكتروني مسجل بالفعل" });
-    }
-
-    const hashed = await bcrypt.hash(password, 12);
-    const vault = encryptPassword(password);
-    const user = await prisma.user.create({
-      data: {
-        name: name.trim().slice(0, 100),
-        email: normalizedEmail,
-        password: hashed,
-        passwordVault: vault,
-        role: "user",
-        verified: false,
-      },
-    });
-
-    await recordLoginAttempt({
-      email: normalizedEmail,
-      ip,
-      userAgent,
-      success: true,
-      reason: "register",
-      userId: user.id,
-    });
-
-    const token = signToken(user);
-    res.json({ token, user: publicUser(user) });
-  } catch (e: any) {
-    res.status(500).json({ error: e.message });
-  }
+router.post("/register", (req, res) => {
+  res.status(403).json({ error: "التسجيل مغلق حالياً" });
 });
 
 // ---------------------------------------------------------------------------

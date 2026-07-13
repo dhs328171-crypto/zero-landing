@@ -5,16 +5,12 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { AuthProvider, useAuth } from "@/contexts/auth-context";
 import { I18nProvider, useI18n } from "@/contexts/i18n-context";
 import { CurrencyProvider } from "@/contexts/currency-context";
-import { FloatingCTA } from "@/components/ui/floating-cta";
 import { ScrollToTop } from "@/components/ui/scroll-to-top";
 import { ScrollProgress } from "@/components/ui/scroll-progress";
-import { CookieConsent } from "@/components/ui/cookie-consent";
 import { PageLoader } from "@/components/ui/page-loader";
 
-// Public guest pages (accessible without login)
-import LandingGate from "@/pages/landing-gate";
+// Login page (only public page)
 import Login from "@/pages/login";
-import Register from "@/pages/register";
 import Terms from "@/pages/terms";
 import Privacy from "@/pages/privacy";
 import NotFound from "@/pages/not-found";
@@ -92,7 +88,6 @@ function GuestRoute({ component: Component }: { component: React.ComponentType }
 
 /** Wrapper that applies the right `dir` on the root public container. */
 function PublicRoutes() {
-  const { isAuthenticated } = useAuth();
   const { dir } = useI18n();
 
   return (
@@ -100,16 +95,13 @@ function PublicRoutes() {
       <PageLoader />
       <ScrollProgress />
       <Switch>
-        {/* Always public */}
+        {/* Only login is public — everything else requires auth */}
         <Route path="/login"><GuestRoute component={Login} /></Route>
-        <Route path="/register"><GuestRoute component={Register} /></Route>
-        <Route path="/terms" component={Terms} />
-        <Route path="/privacy" component={Privacy} />
 
-        {/* Home: gate for guests, full home for logged-in */}
-        <Route path="/">{isAuthenticated ? <Home /> : <LandingGate />}</Route>
+        {/* All pages below require authentication */}
+        <Route path="/"><AuthRoute component={Home} /></Route>
 
-        {/* Protected public pages */}
+        {/* Protected pages */}
         <Route path="/portfolio"><AuthRoute component={Portfolio} /></Route>
         <Route path="/clients"><AuthRoute component={Clients} /></Route>
         <Route path="/pricing"><AuthRoute component={Pricing} /></Route>
@@ -130,15 +122,13 @@ function PublicRoutes() {
         <Route path="/cv"><AuthRoute component={CV} /></Route>
         <Route path="/tools"><AuthRoute component={Tools} /></Route>
         <Route path="/calculator"><AuthRoute component={ProjectCalculator} /></Route>
-
-        {/* Public redirect route — /r/:slug */}
-        <Route path="/r/:slug" component={LinkRedirect} />
+        <Route path="/terms"><AuthRoute component={Terms} /></Route>
+        <Route path="/privacy"><AuthRoute component={Privacy} /></Route>
+        <Route path="/r/:slug"><AuthRoute component={LinkRedirect} /></Route>
 
         <Route component={NotFound} />
       </Switch>
-      <FloatingCTA />
       <ScrollToTop />
-      <CookieConsent />
     </div>
   );
 }
@@ -148,7 +138,7 @@ function AdminRoutes() {
   return (
     <div className="dark min-h-screen bg-background text-foreground font-sans" dir={dir}>
       <Switch>
-        <Route path="/admin/login" component={AdminLogin} />
+        <Route path="/admin/login"><GuestRoute component={AdminLogin} /></Route>
         <Route path="/admin"><AdminRoute component={AdminDashboard} /></Route>
         <Route path="/admin/analytics"><AdminRoute component={AdminAnalytics} /></Route>
         <Route path="/admin/projects"><AdminRoute component={AdminProjects} /></Route>

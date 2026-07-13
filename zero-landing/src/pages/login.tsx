@@ -1,7 +1,7 @@
 import { useState } from "react";
-import { Link, useLocation } from "wouter";
+import { useLocation } from "wouter";
 import { motion } from "framer-motion";
-import { Eye, EyeOff, LogIn, ArrowRight, Mail, Lock, Terminal, Zap } from "lucide-react";
+import { Eye, EyeOff, LogIn, Mail, Lock, Terminal, Zap } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useAuth } from "@/contexts/auth-context";
@@ -53,18 +53,6 @@ export default function Login() {
       <div className="absolute top-6 left-6 z-20">
         <LanguageSwitcher compact />
       </div>
-
-      {/* Back to home */}
-      <Link href="/">
-        <motion.div
-          initial={{ opacity: 0, x: -20 }}
-          animate={{ opacity: 1, x: 0 }}
-          className="absolute top-6 right-6 flex items-center gap-2 text-muted-foreground hover:text-primary transition-colors cursor-pointer group"
-        >
-          <span className="text-sm font-mono">{t("nav.home")}</span>
-          <ArrowRight size={16} className="group-hover:translate-x-1 transition-transform" />
-        </motion.div>
-      </Link>
 
       <motion.div
         initial={{ opacity: 0, y: 30, scale: 0.96 }}
@@ -172,23 +160,6 @@ export default function Login() {
               )}
             </Button>
           </form>
-
-          {/* Divider */}
-          <div className="my-5 flex items-center gap-3">
-            <div className="flex-1 h-px bg-border" />
-            <span className="text-xs text-muted-foreground font-mono">OR</span>
-            <div className="flex-1 h-px bg-border" />
-          </div>
-
-          {/* Register link */}
-          <p className="text-center text-sm text-muted-foreground">
-            {t("auth.noAccount")}{" "}
-            <Link href="/register">
-              <span className="text-primary hover:underline cursor-pointer font-medium">
-                {t("auth.createAccount")}
-              </span>
-            </Link>
-          </p>
 
           {/* Features hint */}
           <div className="mt-6 grid grid-cols-3 gap-2">

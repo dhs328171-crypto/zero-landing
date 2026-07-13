@@ -17,6 +17,7 @@ import {
   redirectLimiter,
 } from "./lib/security.js";
 import authRoutes from "./routes/auth.js";
+import { authRequired } from "./middleware/auth.js";
 import projectRoutes from "./routes/projects.js";
 import blogRoutes from "./routes/blog.js";
 import messageRoutes from "./routes/messages.js";
@@ -111,16 +112,14 @@ app.use("/api", (req, res, next) => {
 // Auth: strict limiter
 app.use("/api/auth", authLimiter, authRoutes);
 
-// Contact form: very strict limiter
-app.use("/api/messages", contactLimiter, messageRoutes);
-
-app.use("/api/projects", projectRoutes);
-app.use("/api/blog", blogRoutes);
-app.use("/api/testimonials", testimonialRoutes);
-app.use("/api/faq", faqRoutes);
-app.use("/api/services", serviceRoutes);
-app.use("/api/stats", statsRoutes);
-app.use("/api/media", mediaRoutes);
+app.use("/api/projects", authRequired, projectRoutes);
+app.use("/api/blog", authRequired, blogRoutes);
+app.use("/api/testimonials", authRequired, testimonialRoutes);
+app.use("/api/faq", authRequired, faqRoutes);
+app.use("/api/services", authRequired, serviceRoutes);
+app.use("/api/stats", authRequired, statsRoutes);
+app.use("/api/media", authRequired, mediaRoutes);
+app.use("/api/messages", contactLimiter, authRequired, messageRoutes);
 
 // Admin-only
 app.use("/api/admin/users", adminUserRoutes);
